@@ -21,6 +21,19 @@ const apiRequest = async (path, options = {}) => {
 
 export const authApi = {
   me: () => apiRequest('/api/auth/me', { method: 'GET' }),
+  permissions: () => apiRequest('/api/auth/permissions', { method: 'GET' }),
+  rolePermissions: () => apiRequest('/api/roles/permissions', { method: 'GET' }),
+  updateRolePermissions: (roles) =>
+    apiRequest('/api/roles/permissions', {
+      method: 'PUT',
+      body: JSON.stringify({ roles }),
+    }),
+  users: () => apiRequest('/api/users', { method: 'GET' }),
+  updateUserRole: (id, role) =>
+    apiRequest(`/api/users/${id}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }),
   login: (email, password) =>
     apiRequest('/api/auth/login', {
       method: 'POST',
@@ -36,6 +49,17 @@ export const authApi = {
 
 export const recordsApi = {
   products: () => apiRequest('/api/products', { method: 'GET' }),
+  createProduct: (payload) =>
+    apiRequest('/api/products', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateProduct: (id, payload) =>
+    apiRequest(`/api/products/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteProduct: (id) => apiRequest(`/api/products/${id}`, { method: 'DELETE' }),
   today: () => apiRequest('/api/daily-records/today', { method: 'GET' }),
   saveToday: (entries) =>
     apiRequest('/api/daily-records/today', {
@@ -43,6 +67,8 @@ export const recordsApi = {
       body: JSON.stringify({ entries }),
     }),
   archive: () => apiRequest('/api/archive/records', { method: 'GET' }),
+  audit: ({ limit = 50, offset = 0 } = {}) =>
+    apiRequest(`/api/audit?limit=${limit}&offset=${offset}`, { method: 'GET' }),
 }
 
 export const shiftsApi = {
@@ -67,9 +93,21 @@ export const shiftsApi = {
   unbook: (id) => apiRequest(`/api/shifts/${id}/unbook`, { method: 'PATCH' }),
   approve: (id) => apiRequest(`/api/shifts/${id}/approve`, { method: 'PATCH' }),
   remove: (id) => apiRequest(`/api/shifts/${id}`, { method: 'DELETE' }),
-  setPaid: (id, isPaid) =>
-    apiRequest(`/api/shifts/${id}/paid`, {
-      method: 'PATCH',
-      body: JSON.stringify({ is_paid: Boolean(isPaid) }),
+}
+
+export const editingApi = {
+  heartbeat: ({ resource, active = true }) =>
+    apiRequest('/api/editing/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ resource, active }),
+    }),
+  status: (resource) =>
+    apiRequest(`/api/editing/status?resource=${encodeURIComponent(resource)}`, {
+      method: 'GET',
+    }),
+  touch: (resource) =>
+    apiRequest('/api/editing/touch', {
+      method: 'POST',
+      body: JSON.stringify({ resource }),
     }),
 }

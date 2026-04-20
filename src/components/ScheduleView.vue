@@ -1,29 +1,221 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { shiftsApi } from '../api'
-import { Calendar, X, Trash2, Save, Check, HandHelping, Bell } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { editingApi, shiftsApi } from '../api'
+import DatePickerSheet from './DatePickerSheet.vue'
+import {
+  Calendar,
+  X,
+  Trash2,
+  Check,
+  Bell,
+  Plus,
+} from 'lucide-vue-next'
 
 const props = defineProps({
   userRole: { type: String, default: '' },
   currentUser: { type: Object, default: null },
   displayName: { type: String, default: 'Сотрудник' },
+  permissions: {
+    type: Object,
+    default: () => ({
+      scheduleManage: false,
+    }),
+  },
 })
+
+const emit = defineEmits(['pending-count'])
 
 const shifts = ref([])
 const loading = ref(true)
 const isModalOpen = ref(false)
 const isExtraShift = ref(false)
 const currentUserName = ref('Сотрудник')
-const showPending = ref(false)
+const showPendingSheet = ref(false)
+const showDatePicker = ref(false)
+const selectedWeekStart = ref('')
 
 const pendingDeletes = ref(new Set())
 const unsavedNewShifts = ref([])
 const isSaving = ref(false)
+const structureSaveStatus = ref('idle')
+const scheduleCollabStatus = ref({
+  activeEditors: [],
+  lastChangedAt: null,
+  lastChangedBy: null,
+})
+let structureStatusHideTimer = null
+let structureAutosaveTimer = null
+let suppressStructureAutosave = false
+let tempShiftSeq = 0
+const DEFAULT_WEEKS_BOOTSTRAP_KEY = 'kofeyny:default-weeks-bootstrap:v1'
+const weekTapTarget = ref('')
+const weekTapCount = ref(0)
+let weekTapTimer = null
+let schedulePresenceTimer = null
 
 const form = ref({ date: '', start_time: '09:00', end_time: '18:00' })
+const startTimeInput = ref(null)
+const endTimeInput = ref(null)
 
 const safeAlert = (message) => alert(message)
 const safeConfirm = (message, callback) => callback(window.confirm(message))
+const canManageSchedule = computed(
+  () => Boolean(props.permissions?.scheduleManage || props.userRole === 'admin'),
+)
+
+const setStructureSaveStatus = (status) => {
+  structureSaveStatus.value = status
+  if (structureStatusHideTimer) clearTimeout(structureStatusHideTimer)
+
+  if (status === 'saved' || status === 'error') {
+    structureStatusHideTimer = setTimeout(() => {
+      structureSaveStatus.value = 'idle'
+      structureStatusHideTimer = null
+    }, 12000)
+  }
+}
+
+const structureSaveLabel = computed(() => {
+  if (structureSaveStatus.value === 'saving') return 'Сохраняется...'
+  if (structureSaveStatus.value === 'error') return 'Ошибка сохранения'
+  if (structureSaveStatus.value === 'saved') return 'Сохранено'
+  return ''
+})
+
+const structureSaveClass = computed(() => {
+  if (structureSaveStatus.value === 'saving') return 'bg-blue-50 text-blue-600 border-blue-100'
+  if (structureSaveStatus.value === 'error') return 'bg-red-50 text-red-500 border-red-100'
+  if (structureSaveStatus.value === 'saved') return 'bg-emerald-50 text-emerald-600 border-emerald-100'
+  return 'bg-slate-50 text-slate-400 border-slate-100'
+})
+
+const formatRelativeTime = (value) => {
+  if (!value) return ''
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return ''
+
+  const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+  if (diffSec < 60) return `${diffSec} сек назад`
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin} мин назад`
+  const diffHours = Math.floor(diffMin / 60)
+  return `${diffHours} ч назад`
+}
+
+const scheduleEditorsLabel = computed(() => {
+  const names = scheduleCollabStatus.value.activeEditors.map((item) => item.user_name)
+  if (names.length === 0) return ''
+  if (names.length === 1) return `Сейчас редактирует: ${names[0]}`
+  return `Сейчас редактируют: ${names.join(', ')}`
+})
+
+const scheduleLastChangedLabel = computed(() => {
+  if (!scheduleCollabStatus.value.lastChangedAt) return ''
+  const who = scheduleCollabStatus.value.lastChangedBy
+    ? ` ${scheduleCollabStatus.value.lastChangedBy}`
+    : ''
+  return `Последнее изменение${who}: ${formatRelativeTime(scheduleCollabStatus.value.lastChangedAt)}`
+})
+
+const stopSchedulePresence = async () => {
+  if (schedulePresenceTimer) {
+    clearInterval(schedulePresenceTimer)
+    schedulePresenceTimer = null
+  }
+
+  if (canManageSchedule.value) {
+    try {
+      await editingApi.heartbeat({ resource: 'schedule', active: false })
+    } catch {
+      // noop
+    }
+  }
+}
+
+const syncSchedulePresence = async () => {
+  if (!canManageSchedule.value) return
+
+  try {
+    await editingApi.heartbeat({ resource: 'schedule', active: true })
+    const status = await editingApi.status('schedule')
+    scheduleCollabStatus.value = {
+      activeEditors: status.activeEditors || [],
+      lastChangedAt: status.lastChangedAt || null,
+      lastChangedBy: status.lastChangedBy || null,
+    }
+  } catch {
+    // noop
+  }
+}
+
+const ensureSchedulePresence = async () => {
+  if (!canManageSchedule.value) {
+    await stopSchedulePresence()
+    return
+  }
+
+  await syncSchedulePresence()
+  if (schedulePresenceTimer) clearInterval(schedulePresenceTimer)
+  schedulePresenceTimer = setInterval(() => {
+    syncSchedulePresence()
+  }, 8000)
+}
+
+const openPicker = (inputRef) => {
+  const input =
+    typeof inputRef?.showPicker === 'function' || typeof inputRef?.focus === 'function'
+      ? inputRef
+      : inputRef?.value
+  if (!input) return
+
+  if (typeof input.showPicker === 'function') {
+    input.showPicker()
+    return
+  }
+
+  if (typeof input.focus === 'function') input.focus()
+  if (typeof input.click === 'function') input.click()
+}
+
+const parseDate = (dateStr) => {
+  const [year, month, day] = String(dateStr).split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+const toDateKey = (date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const addDays = (date, amount) => {
+  const next = new Date(date)
+  next.setDate(next.getDate() + amount)
+  return next
+}
+
+const getNextWeekStart = (weekStart) => toDateKey(addDays(parseDate(weekStart), 7))
+const getWeekDates = (weekStart) =>
+  Array.from({ length: 7 }, (_, index) => toDateKey(addDays(parseDate(weekStart), index)))
+
+const hasBootstrappedDefaultWeeks = () => {
+  if (typeof window === 'undefined') return true
+  return window.localStorage.getItem(DEFAULT_WEEKS_BOOTSTRAP_KEY) === '1'
+}
+
+const markDefaultWeeksBootstrapped = () => {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(DEFAULT_WEEKS_BOOTSTRAP_KEY, '1')
+}
+
+const getWeekStart = (dateStr) => {
+  const date = parseDate(dateStr)
+  const day = date.getDay() || 7
+  return toDateKey(addDays(date, 1 - day))
+}
+
+const getCurrentWeekStart = () => getWeekStart(toDateKey(new Date()))
 
 const resolveUserName = () => {
   if (props.displayName?.trim()) {
@@ -47,7 +239,7 @@ const resolveUserName = () => {
 const formatDateHeader = (dateStr) => {
   if (!dateStr) return ''
 
-  const date = new Date(dateStr)
+  const date = parseDate(dateStr)
   const day = date.getDate().toString().padStart(2, '0')
   const month = (date.getMonth() + 1).toString().padStart(2, '0')
   const weekDay = date
@@ -57,19 +249,187 @@ const formatDateHeader = (dateStr) => {
   return `${day}.${month} ${weekDay}`
 }
 
+const formatShortDate = (dateStr) => {
+  const date = parseDate(dateStr)
+  const day = date.getDate().toString().padStart(2, '0')
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  return `${day}.${month}`
+}
+
+const formatWeekRange = (weekStart) => {
+  const start = parseDate(weekStart)
+  const end = addDays(start, 6)
+  return `${formatShortDate(toDateKey(start))}–${formatShortDate(toDateKey(end))}`
+}
+
+const formatWeekDay = (dateStr) =>
+  parseDate(dateStr).toLocaleDateString('ru-RU', { weekday: 'short' }).toUpperCase()
+
+const formatDateInput = (dateStr) => {
+  if (!dateStr) return 'Выберите дату'
+  return parseDate(dateStr).toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
 const isPastDate = (dateStr) => {
-  const today = new Date().toISOString().split('T')[0]
+  const today = toDateKey(new Date())
   return dateStr < today
 }
 
+const isShiftPast = (shift) => {
+  const now = new Date()
+  const shiftEnd = new Date(`${shift.date}T${shift.end_time}`)
+  return shiftEnd <= now
+}
+
+const normalizePersonName = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+
+const isCurrentUserShift = (shift) => {
+  const shiftName = normalizePersonName(shift.employee_name)
+  if (!shiftName) return false
+
+  const candidates = [
+    currentUserName.value,
+    props.currentUser?.name,
+    props.currentUser?.email?.split('@')[0],
+  ]
+    .map(normalizePersonName)
+    .filter(Boolean)
+
+  return candidates.includes(shiftName)
+}
+
+const canSelfCancelBooking = (shift) => isCurrentUserShift(shift) && !isShiftPast(shift)
+
+const createDefaultWeekTemplate = (weekStart) => {
+  const start = parseDate(weekStart)
+  const result = []
+
+  for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+    const date = toDateKey(addDays(start, dayIndex))
+    const slots =
+      dayIndex === 6
+        ? [
+            ['09:00', '15:00'],
+            ['09:00', '15:00'],
+            ['14:00', '21:00'],
+            ['14:00', '21:00'],
+          ]
+        : [
+            ['09:00', '15:00'],
+            ['14:00', '21:00'],
+          ]
+
+    slots.forEach(([start_time, end_time]) => {
+      result.push({ date, start_time, end_time })
+    })
+  }
+
+  return result
+}
+
+const buildShiftCountMap = (shiftList) => {
+  const counts = new Map()
+  shiftList.forEach((shift) => {
+    const key = `${shift.date}|${shift.start_time}|${shift.end_time}`
+    counts.set(key, (counts.get(key) || 0) + 1)
+  })
+  return counts
+}
+
+const pickMissingTemplateShifts = (weekStartsList, shiftList) => {
+  const available = buildShiftCountMap(shiftList)
+  const missing = []
+
+  weekStartsList.forEach((weekStart) => {
+    createDefaultWeekTemplate(weekStart).forEach((templateShift) => {
+      const key = `${templateShift.date}|${templateShift.start_time}|${templateShift.end_time}`
+      const count = available.get(key) || 0
+      if (count > 0) {
+        available.set(key, count - 1)
+      } else {
+        missing.push(templateShift)
+      }
+    })
+  })
+
+  return missing
+}
+
+const makeTempShift = ({ date, start_time, end_time }) => ({
+  id: -(Date.now() + tempShiftSeq++),
+  date,
+  start_time,
+  end_time,
+  status: 'approved',
+  employee_name: null,
+})
+
 const fetchShifts = async () => {
+  suppressStructureAutosave = true
   try {
+    const previousWeekStart = selectedWeekStart.value
     const response = await shiftsApi.upcoming()
     shifts.value = response.shifts || []
+
+    const approvedServerShifts = shifts.value.filter(
+      (shift) => (shift.status || 'approved') === 'approved',
+    )
+
+    if (canManageSchedule.value && approvedServerShifts.length === 0 && !hasBootstrappedDefaultWeeks()) {
+      const currentWeek = getCurrentWeekStart()
+      const nextWeek = getNextWeekStart(currentWeek)
+      const defaults = [
+        ...createDefaultWeekTemplate(currentWeek),
+        ...createDefaultWeekTemplate(nextWeek),
+      ]
+
+      await shiftsApi.bulkSave({
+        deletedIds: [],
+        newShifts: defaults,
+      })
+
+      markDefaultWeeksBootstrapped()
+      const refreshed = await shiftsApi.upcoming()
+      shifts.value = refreshed.shifts || []
+    } else if (approvedServerShifts.length > 0) {
+      markDefaultWeeksBootstrapped()
+    }
+
+    const currentWeekStart = getCurrentWeekStart()
+    const availableWeeks = Array.from(
+      new Set(
+        shifts.value
+          .filter((shift) => (shift.status || 'approved') === 'approved')
+          .map((shift) => getWeekStart(shift.date))
+          .filter((weekStart) => weekStart >= currentWeekStart),
+      ),
+    ).sort()
+
+    const firstApprovedShift = shifts.value
+      .filter((shift) => (shift.status || 'approved') === 'approved')
+      .sort((a, b) => `${a.date}T${a.start_time}`.localeCompare(`${b.date}T${b.start_time}`))[0]
+
+    if (previousWeekStart && availableWeeks.includes(previousWeekStart)) {
+      selectedWeekStart.value = previousWeekStart
+    } else if (firstApprovedShift) {
+      selectedWeekStart.value = getWeekStart(firstApprovedShift.date)
+    } else {
+      selectedWeekStart.value = currentWeekStart
+    }
+
     pendingDeletes.value.clear()
     unsavedNewShifts.value = []
   } catch (error) {
     safeAlert(error?.message || 'Ошибка загрузки смен')
+  } finally {
+    suppressStructureAutosave = false
   }
 }
 
@@ -108,9 +468,134 @@ const groupedShifts = computed(() => {
   return groups
 })
 
+const weekStarts = computed(() => {
+  const currentWeekStart = getCurrentWeekStart()
+  const starts = new Set([currentWeekStart])
+
+  approvedShifts.value.forEach((shift) => {
+    const weekStart = getWeekStart(shift.date)
+    if (weekStart >= currentWeekStart) starts.add(weekStart)
+  })
+
+  return Array.from(starts).sort()
+})
+
+const selectedWeekDays = computed(() => {
+  const weekStart = selectedWeekStart.value || weekStarts.value[0] || getCurrentWeekStart()
+  const start = parseDate(weekStart)
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = toDateKey(addDays(start, index))
+    const dayShifts = groupedShifts.value[date] || []
+    const occupiedCount = dayShifts.filter((shift) => shift.employee_name).length
+
+    return {
+      date,
+      shifts: dayShifts,
+      occupiedCount,
+      openCount: dayShifts.length - occupiedCount,
+    }
+  })
+})
+
+const selectedWeekStats = computed(() => {
+  const shiftsCount = selectedWeekDays.value.reduce(
+    (sum, day) => sum + day.shifts.length,
+    0,
+  )
+  const openCount = selectedWeekDays.value.reduce((sum, day) => sum + day.openCount, 0)
+  const myCount = selectedWeekDays.value.reduce(
+    (sum, day) =>
+      sum +
+      day.shifts.filter((shift) => isCurrentUserShift(shift)).length,
+    0,
+  )
+
+  return { shiftsCount, openCount, myCount }
+})
+
 const pendingRequests = computed(() =>
   shifts.value.filter((shift) => (shift.status || 'approved') === 'pending'),
 )
+
+const selectWeek = (weekStart) => {
+  selectedWeekStart.value = weekStart
+}
+
+const onWeekTabClick = (weekStart) => {
+  selectWeek(weekStart)
+
+  if (!canManageSchedule.value) return
+
+  if (weekTapTimer) clearTimeout(weekTapTimer)
+  if (weekTapTarget.value === weekStart) {
+    weekTapCount.value += 1
+  } else {
+    weekTapTarget.value = weekStart
+    weekTapCount.value = 1
+  }
+
+  if (weekTapCount.value >= 3) {
+    weekTapTarget.value = ''
+    weekTapCount.value = 0
+    deleteWeek(weekStart)
+    return
+  }
+
+  weekTapTimer = setTimeout(() => {
+    weekTapTarget.value = ''
+    weekTapCount.value = 0
+  }, 550)
+}
+
+const deleteWeek = (weekStart) => {
+  if (!canManageSchedule.value) return
+
+  const weekDateSet = new Set(getWeekDates(weekStart))
+  const hasBookedShift = approvedShifts.value.some(
+    (shift) => weekDateSet.has(shift.date) && Boolean(shift.employee_name),
+  )
+
+  if (hasBookedShift) {
+    safeAlert('Нельзя удалить неделю: есть смены с записью сотрудников')
+    return
+  }
+
+  safeConfirm(`Удалить всю неделю ${formatWeekRange(weekStart)}?`, (ok) => {
+    if (!ok) return
+
+    unsavedNewShifts.value = unsavedNewShifts.value.filter(
+      (shift) => !weekDateSet.has(shift.date),
+    )
+
+    approvedShifts.value.forEach((shift) => {
+      if (weekDateSet.has(shift.date) && shift.id > 0) {
+        pendingDeletes.value.add(shift.id)
+      }
+    })
+
+    if (selectedWeekStart.value === weekStart) {
+      const remainingWeeks = weekStarts.value.filter((item) => item !== weekStart)
+      selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
+    }
+  })
+}
+
+const addNextWeekTemplate = () => {
+  if (!canManageSchedule.value) return
+
+  const lastWeek = weekStarts.value[weekStarts.value.length - 1] || getCurrentWeekStart()
+  const nextWeek = getNextWeekStart(lastWeek)
+  const missing = pickMissingTemplateShifts([nextWeek], approvedShifts.value)
+
+  if (missing.length === 0) {
+    selectedWeekStart.value = nextWeek
+    return
+  }
+
+  unsavedNewShifts.value.push(...missing.map(makeTempShift))
+  selectedWeekStart.value = nextWeek
+}
 
 const bookShift = (shift) => {
   if (shift.employee_name) return
@@ -128,6 +613,11 @@ const bookShift = (shift) => {
 }
 
 const cancelBooking = (shift) => {
+  if (isCurrentUserShift(shift) && isShiftPast(shift)) {
+    safeAlert('Нельзя снять запись с прошедшей смены')
+    return
+  }
+
   safeConfirm(`Убрать запись сотрудника ${shift.employee_name}?`, async (ok) => {
     if (!ok) return
 
@@ -150,9 +640,22 @@ const openModal = (date = null, isHelp = false) => {
   isModalOpen.value = true
 }
 
+defineExpose({
+  openCreateShift: () => openModal(),
+  openHelpRequest: () => openModal(null, true),
+  openPendingRequests: () => {
+    showPendingSheet.value = true
+  },
+})
+
 const handleSaveModal = async () => {
   if (!form.value.date || !form.value.start_time || !form.value.end_time) {
     safeAlert('Заполните дату и время')
+    return
+  }
+
+  if (isPastDate(form.value.date)) {
+    safeAlert('Нельзя добавить смену в прошедшую дату')
     return
   }
 
@@ -172,7 +675,6 @@ const handleSaveModal = async () => {
       id: tempId,
       status: 'approved',
       employee_name: null,
-      is_paid: false,
     })
   }
 
@@ -197,6 +699,7 @@ const approveRequest = async (shift) => {
   try {
     await shiftsApi.approve(shift.id)
     shift.status = 'approved'
+    if (pendingRequests.value.length === 0) showPendingSheet.value = false
   } catch (error) {
     safeAlert(error?.message || 'Не удалось подтвердить заявку')
   }
@@ -206,13 +709,20 @@ const rejectRequest = async (shiftId) => {
   try {
     await shiftsApi.remove(shiftId)
     shifts.value = shifts.value.filter((shift) => shift.id !== shiftId)
+    if (pendingRequests.value.length === 0) showPendingSheet.value = false
   } catch (error) {
     safeAlert(error?.message || 'Не удалось отклонить заявку')
   }
 }
 
-const saveStructure = async () => {
+const hasStructureChanges = computed(
+  () => unsavedNewShifts.value.length > 0 || pendingDeletes.value.size > 0,
+)
+
+const saveStructure = async ({ silent = false } = {}) => {
+  if (!hasStructureChanges.value || isSaving.value) return
   isSaving.value = true
+  setStructureSaveStatus('saving')
 
   try {
     await shiftsApi.bulkSave({
@@ -225,8 +735,10 @@ const saveStructure = async () => {
     })
 
     await fetchShifts()
+    setStructureSaveStatus('saved')
   } catch (error) {
-    safeAlert(error?.message || 'Не удалось сохранить изменения')
+    setStructureSaveStatus('error')
+    if (!silent) safeAlert(error?.message || 'Не удалось сохранить изменения')
   } finally {
     isSaving.value = false
   }
@@ -239,102 +751,153 @@ watch(
   },
 )
 
+watch(
+  weekStarts,
+  (weeks) => {
+    if (weeks.length === 0) {
+      selectedWeekStart.value = getCurrentWeekStart()
+      return
+    }
+
+    if (!weeks.includes(selectedWeekStart.value)) {
+      selectedWeekStart.value = weeks[0]
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  pendingRequests,
+  (requests) => {
+    emit('pending-count', requests.length)
+    if (requests.length === 0) showPendingSheet.value = false
+  },
+  { immediate: true },
+)
+
+watch(
+  [
+    () => unsavedNewShifts.value.length,
+    () => pendingDeletes.value.size,
+  ],
+  () => {
+    if (!canManageSchedule.value) return
+    if (suppressStructureAutosave) return
+    if (!hasStructureChanges.value) return
+    if (isModalOpen.value) return
+
+    if (structureAutosaveTimer) clearTimeout(structureAutosaveTimer)
+    structureAutosaveTimer = setTimeout(() => {
+      saveStructure({ silent: true })
+    }, 600)
+  },
+)
+
 onMounted(initialize)
+onMounted(ensureSchedulePresence)
+
+onBeforeUnmount(() => {
+  if (structureAutosaveTimer) clearTimeout(structureAutosaveTimer)
+  if (structureStatusHideTimer) clearTimeout(structureStatusHideTimer)
+  if (weekTapTimer) clearTimeout(weekTapTimer)
+  stopSchedulePresence()
+})
 </script>
 
 <template>
   <div class="pb-32 bg-slate-50 min-h-screen">
-    <div class="px-4 py-4 flex justify-between items-center sticky top-0 bg-white/80 backdrop-blur-md z-40 border-b border-slate-100">
-      <h2 class="text-2xl font-black italic tracking-tighter text-slate-800 uppercase">График</h2>
-
-      <div class="flex gap-2">
-        <button
-          v-if="userRole === 'admin' && pendingRequests.length > 0"
-          @click="showPending = !showPending"
-          class="relative p-2 bg-white border border-blue-100 rounded-xl text-blue-600 shadow-sm active:scale-95 transition-all"
-        >
-          <Bell class="w-5 h-5" :class="{ 'animate-swing': pendingRequests.length > 0 }" />
-          <span class="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
-            {{ pendingRequests.length }}
-          </span>
-        </button>
-
-        <button
-          v-if="userRole === 'admin'"
-          @click="openModal()"
-          class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase shadow-lg shadow-blue-200"
-        >
-          + Смена
-        </button>
-
-        <button
-          v-else
-          @click="openModal(null, true)"
-          class="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 shadow-lg"
-        >
-          <HandHelping class="w-3 h-3" />
-          Помочь
-        </button>
-      </div>
-    </div>
-
     <div v-if="loading" class="flex flex-col items-center justify-center py-20 opacity-30">
       <div class="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
       <p class="text-[10px] font-black uppercase tracking-widest">Загрузка...</p>
     </div>
 
     <div v-else class="px-3 py-4">
-      <div v-if="showPending && userRole === 'admin'" class="mb-6 animate-in slide-in-from-top duration-300">
-        <div class="bg-blue-600 rounded-3xl p-4 shadow-xl shadow-blue-100">
-          <div class="flex justify-between items-center mb-4">
-            <h4 class="text-[11px] font-black text-white uppercase flex items-center gap-2">
-              <Bell class="w-3.5 h-3.5" />
-              Заявки на подтверждение
-            </h4>
-            <button @click="showPending = false" class="text-white/50">
-              <X class="w-4 h-4" />
-            </button>
-          </div>
+      <div
+        v-if="canManageSchedule && scheduleEditorsLabel"
+        class="rounded-lg border border-amber-100 bg-amber-50 text-amber-700 px-3 py-2 text-[10px] font-black uppercase mb-3"
+      >
+        {{ scheduleEditorsLabel }}
+      </div>
 
-          <div class="space-y-2">
-            <div
-              v-for="req in pendingRequests"
-              :key="req.id"
-              class="bg-white p-3 rounded-2xl flex justify-between items-center shadow-inner"
-            >
-              <div>
-                <p class="text-[9px] font-black text-slate-400 uppercase">{{ formatDateHeader(req.date) }}</p>
-                <p class="text-xs font-bold text-slate-700">{{ req.start_time }}-{{ req.end_time }}</p>
-                <p class="text-[10px] font-bold text-blue-600 uppercase">{{ req.employee_name }}</p>
-              </div>
-              <div class="flex gap-1">
-                <button @click="rejectRequest(req.id)" class="p-2 text-red-500 bg-red-50 rounded-xl">
-                  <X class="w-4 h-4" />
-                </button>
-                <button @click="approveRequest(req)" class="p-2 text-green-600 bg-green-50 rounded-xl">
-                  <Check class="w-4 h-4" />
-                </button>
-              </div>
-            </div>
+      <div
+        v-if="canManageSchedule && scheduleLastChangedLabel"
+        class="rounded-lg border border-slate-100 bg-slate-50 text-slate-500 px-3 py-2 text-[10px] font-black uppercase mb-3"
+      >
+        {{ scheduleLastChangedLabel }}
+      </div>
+
+      <div v-if="approvedShifts.length > 0" class="mb-4">
+        <div class="flex gap-2 overflow-x-auto pb-1 mb-3">
+          <button
+            v-for="weekStart in weekStarts"
+            :key="weekStart"
+            @click="onWeekTabClick(weekStart)"
+            class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all"
+            :class="
+              weekStart === selectedWeekStart
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-white text-slate-400 border-slate-100'
+            "
+            type="button"
+          >
+            <span class="block text-[10px] font-black uppercase">Неделя</span>
+            <span class="block text-xs font-black">{{ formatWeekRange(weekStart) }}</span>
+          </button>
+          <button
+            v-if="canManageSchedule"
+            @click="addNextWeekTemplate"
+            class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all bg-white text-slate-400 border-slate-100 flex items-center justify-center min-w-[108px]"
+            type="button"
+            aria-label="Добавить неделю"
+          >
+            <Plus class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mb-5">
+          <div class="bg-white rounded-lg border border-slate-100 p-3">
+            <p class="text-[9px] font-black text-slate-400 uppercase">Всего</p>
+            <p class="text-xl font-black text-slate-800">{{ selectedWeekStats.shiftsCount }}</p>
+          </div>
+          <div class="bg-white rounded-lg border border-slate-100 p-3">
+            <p class="text-[9px] font-black text-slate-400 uppercase">Свободно</p>
+            <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.openCount }}</p>
+          </div>
+          <div class="bg-white rounded-lg border border-slate-100 p-3">
+            <p class="text-[9px] font-black text-slate-400 uppercase">Мои</p>
+            <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.myCount }}</p>
           </div>
         </div>
       </div>
 
       <div class="space-y-8">
-        <div v-for="(dayShifts, date) in groupedShifts" :key="date" class="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          <h3 class="text-[11px] font-black text-slate-400 uppercase mb-3 ml-1 tracking-widest">{{ formatDateHeader(date) }}</h3>
+        <div
+          v-for="day in selectedWeekDays"
+          :key="day.date"
+          class="animate-in fade-in slide-in-from-bottom-2 duration-500"
+        >
+          <div class="flex items-center justify-between mb-3 ml-1">
+            <div>
+              <h3 class="text-[11px] font-black text-blue-600 uppercase tracking-widest">{{ formatDateHeader(day.date) }}</h3>
+            </div>
+          </div>
+
+          <div v-if="day.shifts.length === 0" class="bg-white/70 border border-dashed border-slate-100 rounded-lg p-4 text-center">
+            <p class="text-[10px] font-black uppercase text-slate-300">{{ formatWeekDay(day.date) }} свободен</p>
+          </div>
+
           <div class="space-y-2">
             <div
-              v-for="shift in dayShifts"
+              v-for="shift in day.shifts"
               :key="shift.id"
-              class="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between transition-all"
+              class="bg-white p-3.5 rounded-lg border border-slate-100 shadow-sm flex items-center justify-between transition-all"
               :class="{ 'opacity-50': isPastDate(shift.date) }"
             >
               <div class="flex items-center gap-2">
-                <span class="text-[12px] font-black bg-slate-50 px-2 py-1.5 rounded-xl border border-slate-100 text-slate-700">
+                <span class="text-[12px] font-black bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-slate-800">
                   {{ shift.start_time }}–{{ shift.end_time }}
                 </span>
-                <span v-if="shift.id < 0" class="text-[8px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded-full uppercase">
+                <span v-if="shift.id < 0" class="text-[8px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase">
                   New
                 </span>
               </div>
@@ -342,13 +905,13 @@ onMounted(initialize)
               <div class="flex items-center gap-3">
                 <div
                   v-if="shift.employee_name"
-                  class="flex items-center gap-2 bg-blue-50/50 px-3 py-1.5 rounded-xl border border-blue-100/50"
+                  class="flex items-center gap-2 bg-blue-50/50 px-3 py-1.5 rounded-lg border border-blue-100/50"
                 >
-                  <span class="text-[11px] font-black text-blue-700">{{ shift.employee_name }}</span>
+                  <span class="text-[11px] font-black text-blue-600">{{ shift.employee_name }}</span>
                   <button
-                    v-if="userRole === 'admin' || shift.employee_name === currentUserName"
+                    v-if="canManageSchedule || canSelfCancelBooking(shift)"
                     @click="cancelBooking(shift)"
-                    class="text-red-400 p-0.5 hover:bg-white rounded-md transition-colors"
+                    class="text-red-500 p-0.5 hover:bg-white rounded-md transition-colors"
                   >
                     <X class="w-3.5 h-3.5" />
                   </button>
@@ -357,15 +920,15 @@ onMounted(initialize)
                 <button
                   v-else-if="!isPastDate(shift.date)"
                   @click="bookShift(shift)"
-                  class="bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-md active:scale-95 transition-all"
+                  class="bg-slate-800 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md active:scale-95 transition-all"
                 >
                   Запись
                 </button>
 
                 <button
-                  v-if="userRole === 'admin'"
+                  v-if="canManageSchedule"
                   @click="markForDeletion(shift)"
-                  class="text-slate-200 hover:text-red-400 transition-colors"
+                  class="text-slate-200 hover:text-red-500 transition-colors"
                 >
                   <Trash2 class="w-4 h-4" />
                 </button>
@@ -382,26 +945,20 @@ onMounted(initialize)
     </div>
 
     <div
-      v-if="(unsavedNewShifts.length > 0 || pendingDeletes.size > 0) && userRole === 'admin'"
-      class="fixed left-4 right-4 z-50 animate-in slide-in-from-bottom-5 duration-300"
-      :style="{ bottom: 'calc(85px + env(safe-area-inset-bottom))' }"
+      v-if="canManageSchedule && structureSaveLabel"
+      class="fixed left-1/2 -translate-x-1/2 z-[120] pointer-events-none"
+      :style="{ bottom: 'calc(86px + env(safe-area-inset-bottom))' }"
     >
-      <button
-        @click="saveStructure"
-        :disabled="isSaving"
-        class="w-full bg-blue-600 text-white py-4 rounded-2xl shadow-2xl shadow-blue-300 font-black uppercase text-xs flex items-center justify-center gap-2 active:scale-95 transition-all"
+      <div
+        class="rounded-full border px-4 py-2 text-[11px] font-black uppercase shadow-sm backdrop-blur-sm"
+        :class="structureSaveClass"
       >
-        <span
-          v-if="isSaving"
-          class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
-        />
-        <Save v-else class="w-4 h-4" />
-        Сохранить изменения ({{ unsavedNewShifts.length + pendingDeletes.size }})
-      </button>
+        {{ structureSaveLabel }}
+      </div>
     </div>
 
-    <div v-if="isModalOpen" class="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div class="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-in slide-in-from-bottom duration-300">
+    <div v-if="isModalOpen" class="fixed inset-0 z-[130] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm p-4 pt-safe">
+      <div class="bg-white w-full max-w-sm rounded-[32px] p-8 sheet-safe sheet-max overflow-y-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
         <div class="flex justify-between items-center mb-8">
           <div>
             <h3 class="text-xl font-black uppercase italic tracking-tighter">
@@ -415,29 +972,36 @@ onMounted(initialize)
         </div>
 
         <div class="space-y-6">
-          <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+          <div
+            class="bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer"
+            @click="showDatePicker = true"
+          >
             <label class="text-[10px] font-black text-slate-400 uppercase mb-2 block">Выберите дату</label>
-            <input
-              type="date"
-              v-model="form.date"
-              class="w-full bg-transparent border-none p-0 text-sm font-bold outline-none"
-            />
+            <p class="text-sm font-bold text-slate-800">{{ formatDateInput(form.date) }}</p>
           </div>
           <div class="flex gap-4">
-            <div class="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <div
+              class="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer"
+              @click="openPicker(startTimeInput)"
+            >
               <label class="text-[10px] font-black text-slate-400 uppercase mb-2 block text-center">Начало</label>
               <input
+                ref="startTimeInput"
                 type="time"
                 v-model="form.start_time"
-                class="w-full bg-transparent border-none p-0 text-sm font-bold text-center outline-none"
+                class="w-full bg-transparent border-none p-0 text-sm font-bold text-center outline-none cursor-pointer"
               />
             </div>
-            <div class="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <div
+              class="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer"
+              @click="openPicker(endTimeInput)"
+            >
               <label class="text-[10px] font-black text-slate-400 uppercase mb-2 block text-center">Конец</label>
               <input
+                ref="endTimeInput"
                 type="time"
                 v-model="form.end_time"
-                class="w-full bg-transparent border-none p-0 text-sm font-bold text-center outline-none"
+                class="w-full bg-transparent border-none p-0 text-sm font-bold text-center outline-none cursor-pointer"
               />
             </div>
           </div>
@@ -449,6 +1013,86 @@ onMounted(initialize)
         >
           {{ isExtraShift ? 'Отправить заявку' : 'Добавить в черновик' }}
         </button>
+      </div>
+    </div>
+
+    <DatePickerSheet
+      v-if="showDatePicker"
+      v-model="form.date"
+      title="Дата смены"
+      :minDate="toDateKey(new Date())"
+      @close="showDatePicker = false"
+    />
+
+    <div
+      v-if="showPendingSheet && canManageSchedule"
+      class="fixed inset-0 z-[110] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm pt-safe"
+      @click.self="showPendingSheet = false"
+    >
+      <div class="bg-white w-full max-w-md sheet-max rounded-t-[28px] p-4 sheet-safe shadow-2xl animate-in slide-in-from-bottom duration-300 overflow-hidden flex flex-col">
+        <div class="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-4" />
+
+        <div class="flex justify-between items-start gap-4 mb-4">
+          <div>
+            <h3 class="text-xl font-black uppercase italic tracking-tighter">
+              Заявки
+            </h3>
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+              {{ pendingRequests.length }} на подтверждение
+            </p>
+          </div>
+          <button @click="showPendingSheet = false" class="bg-slate-50 p-2 rounded-full text-slate-300">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div v-if="pendingRequests.length === 0" class="text-center py-12 opacity-30">
+          <Bell class="w-10 h-10 mx-auto mb-3" />
+          <p class="text-xs font-black uppercase">Заявок нет</p>
+        </div>
+
+        <div v-else class="space-y-2 overflow-y-auto pb-2">
+          <div
+            v-for="req in pendingRequests"
+            :key="req.id"
+            class="bg-slate-50 border border-slate-100 rounded-2xl p-3"
+          >
+            <div class="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  {{ formatDateHeader(req.date) }}
+                </p>
+                <p class="text-base font-black text-slate-800 mt-1">
+                  {{ req.start_time }}–{{ req.end_time }}
+                </p>
+              </div>
+              <span class="bg-blue-50 text-blue-600 border border-blue-100 px-2 py-1 rounded-lg text-[9px] font-black uppercase">
+                Помочь
+              </span>
+            </div>
+
+            <p class="text-[11px] font-black text-blue-600 uppercase mb-3">
+              {{ req.employee_name }}
+            </p>
+
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                @click="rejectRequest(req.id)"
+                class="bg-red-50 text-red-500 py-3 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+              >
+                <X class="w-4 h-4" />
+                Отклонить
+              </button>
+              <button
+                @click="approveRequest(req)"
+                class="bg-blue-600 text-white py-3 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+              >
+                <Check class="w-4 h-4" />
+                Подтвердить
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

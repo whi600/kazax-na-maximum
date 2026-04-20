@@ -43,8 +43,8 @@ const submit = () => {
   <section class="min-h-screen bg-gradient-to-b from-blue-50 via-slate-50 to-white flex items-center justify-center p-4">
     <div class="w-full max-w-sm bg-white rounded-3xl p-5 shadow-xl border border-blue-100/70">
       <div class="mb-5 text-center">
-        <h1 class="text-2xl font-black italic tracking-tight text-slate-900 uppercase">Кофетерий</h1>
-        <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mt-1">
+        <h1 class="text-2xl font-black italic tracking-tight text-slate-800 uppercase">Кофетерий</h1>
+        <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-1">
           Вход в систему
         </p>
       </div>
@@ -53,14 +53,14 @@ const submit = () => {
         <button
           @click="mode = 'signin'"
           class="flex-1 py-2 rounded-xl text-[11px] font-black uppercase transition-colors"
-          :class="mode === 'signin' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'"
+          :class="mode === 'signin' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'"
         >
           Войти
         </button>
         <button
           @click="mode = 'signup'"
           class="flex-1 py-2 rounded-xl text-[11px] font-black uppercase transition-colors"
-          :class="mode === 'signup' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'"
+          :class="mode === 'signup' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'"
         >
           Регистрация
         </button>
@@ -76,7 +76,7 @@ const submit = () => {
               type="text"
               placeholder="Ваше имя"
               autocomplete="name"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-400"
+              class="w-full bg-slate-50 border border-slate-100 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-400"
             />
           </div>
         </label>
@@ -90,7 +90,7 @@ const submit = () => {
               type="email"
               placeholder="name@company.com"
               autocomplete="email"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-400"
+              class="w-full bg-slate-50 border border-slate-100 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-400"
             />
           </div>
         </label>
@@ -104,7 +104,7 @@ const submit = () => {
               type="password"
               placeholder="Минимум 6 символов"
               autocomplete="current-password"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-400"
+              class="w-full bg-slate-50 border border-slate-100 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-400"
               @keydown.enter="submit"
             />
           </div>
@@ -129,7 +129,7 @@ const submit = () => {
         {{ mode === 'signin' ? 'Войти' : 'Создать аккаунт' }}
       </button>
 
-      <p v-if="message" class="mt-4 text-[11px] font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl p-3">
+      <p v-if="message" class="mt-4 text-[11px] font-semibold text-slate-400 bg-slate-50 border border-slate-100 rounded-xl p-3">
         {{ message }}
       </p>
     </div>

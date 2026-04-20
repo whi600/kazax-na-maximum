@@ -93,6 +93,74 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);
     `,
   },
+  {
+    name: '004_audit_log',
+    sql: `
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        actor_name TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT,
+        action TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT,
+        context_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_entity_type ON audit_log(entity_type);
+    `,
+  },
+  {
+    name: '005_editing_presence',
+    sql: `
+      CREATE TABLE IF NOT EXISTS editing_presence (
+        resource TEXT NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_name TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY(resource, user_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_editing_presence_resource_updated
+        ON editing_presence(resource, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS resource_state (
+        resource TEXT PRIMARY KEY,
+        last_changed_at TEXT,
+        last_changed_by TEXT
+      );
+    `,
+  },
+  {
+    name: '006_role_permissions',
+    sql: `
+      CREATE TABLE IF NOT EXISTS role_permissions (
+        role TEXT PRIMARY KEY,
+        report_edit INTEGER NOT NULL DEFAULT 0,
+        products_manage INTEGER NOT NULL DEFAULT 0,
+        schedule_manage INTEGER NOT NULL DEFAULT 0,
+        audit_view INTEGER NOT NULL DEFAULT 0,
+        roles_manage INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      INSERT OR IGNORE INTO role_permissions(
+        role,
+        report_edit,
+        products_manage,
+        schedule_manage,
+        audit_view,
+        roles_manage
+      )
+      VALUES
+        ('admin', 1, 1, 1, 1, 1),
+        ('chef', 1, 0, 0, 0, 0),
+        ('employee', 1, 0, 0, 0, 0);
+    `,
+  },
 ]
 
 const appliedMigrationRows = db.prepare('SELECT name FROM migrations').all()

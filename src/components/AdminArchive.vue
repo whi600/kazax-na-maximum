@@ -1,34 +1,90 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { recordsApi, shiftsApi } from '../api'
-import { Calendar, Clock, User, Check } from 'lucide-vue-next'
+import { Calendar, Clock, User } from 'lucide-vue-next'
+import DatePickerSheet from './DatePickerSheet.vue'
 
 const props = defineProps({
   lockedMode: { type: String, default: '' },
   hideToggle: { type: Boolean, default: false },
+  canViewAudit: { type: Boolean, default: false },
 })
 
-const archiveMode = ref(props.lockedMode || 'records')
+const normalizeArchiveView = (view) => {
+  if (view === 'shifts') return 'shiftHistory'
+  if (view === 'hours') return 'shiftHours'
+  if (view === 'audit') return 'audit'
+  if (view === 'shiftHistory' || view === 'shiftHours') return view
+  return 'records'
+}
+
+const archiveView = ref(normalizeArchiveView(props.lockedMode))
 const recordsHistory = ref({})
 const shifts = ref([])
+const auditLogs = ref([])
 
 const recordsLoading = ref(false)
 const shiftsLoading = ref(false)
+const auditLoading = ref(false)
 const recordsLoaded = ref(false)
 const shiftsLoaded = ref(false)
+const auditLoaded = ref(false)
 
-const showPaid = ref(false)
 const selectedEmployee = ref('all')
+const periodStart = ref('')
+const periodEnd = ref('')
+const activeDatePicker = ref('')
+const visibleRecordDays = ref(5)
+const recordsLoadMoreRef = ref(null)
+let recordsLoadObserver = null
 
 const safeAlert = (message) => alert(message)
 
+const parseDate = (dateStr) => {
+  const [year, month, day] = String(dateStr || '').split('-').map(Number)
+  if (!year || !month || !day) return new Date()
+  return new Date(year, month - 1, day)
+}
+
 const formatDateLabel = (dateStr) => {
   if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('ru-RU', {
+  return parseDate(dateStr).toLocaleDateString('ru-RU', {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
   })
+}
+
+const formatShiftDay = (dateStr) =>
+  parseDate(dateStr).toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+  })
+
+const formatShiftWeekday = (dateStr) =>
+  parseDate(dateStr).toLocaleDateString('ru-RU', { weekday: 'long' })
+
+const toDateKey = (date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const getRecordDateKey = (dateValue) => {
+  if (!dateValue) return ''
+  const date = new Date(dateValue)
+  if (Number.isNaN(date.getTime())) return ''
+  return toDateKey(date)
+}
+
+const formatRecordWeekday = (dateKey) =>
+  parseDate(dateKey).toLocaleDateString('ru-RU', { weekday: 'long' }).toUpperCase()
+
+const setDefaultPeriod = () => {
+  const now = new Date()
+  periodStart.value = toDateKey(new Date(now.getFullYear(), now.getMonth(), 1))
+  periodEnd.value = toDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0))
 }
 
 const parseShiftHours = (shift) => {
@@ -57,25 +113,20 @@ const baseShifts = computed(() =>
 )
 
 const employees = computed(() => {
-  const uniqueNames = new Set()
+  const stats = new Map()
 
   baseShifts.value.forEach((shift) => {
-    if (shift.employee_name) {
-      uniqueNames.add(shift.employee_name)
-    }
+    const current = stats.get(shift.employee_name) || 0
+    stats.set(shift.employee_name, current + 1)
   })
 
-  return Array.from(uniqueNames)
-    .map((name) => ({ key: name, name }))
+  return Array.from(stats.entries())
+    .map(([name, count]) => ({ key: name, name, count }))
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
 })
 
-const visibleShifts = computed(() =>
-  baseShifts.value.filter((shift) => (showPaid.value ? true : !shift.is_paid)),
-)
-
 const filteredShifts = computed(() =>
-  visibleShifts.value.filter((shift) => {
+  baseShifts.value.filter((shift) => {
     if (selectedEmployee.value === 'all') return true
     return shift.employee_name === selectedEmployee.value
   }),
@@ -91,7 +142,11 @@ const groupedShiftHistory = computed(() => {
   const map = new Map()
 
   sorted.forEach((shift) => {
-    const label = formatDateLabel(shift.date)
+    const date = parseDate(shift.date)
+    const label = date.toLocaleDateString('ru-RU', {
+      month: 'long',
+      year: 'numeric',
+    })
 
     if (!map.has(label)) {
       const group = { label, items: [] }
@@ -105,18 +160,155 @@ const groupedShiftHistory = computed(() => {
   return list
 })
 
-const totalHoursAll = computed(() =>
-  visibleShifts.value.reduce((sum, shift) => sum + parseShiftHours(shift), 0),
+const selectedEmployeeName = computed(() => {
+  if (selectedEmployee.value === 'all') return 'Все сотрудники'
+  return selectedEmployee.value
+})
+
+const selectedEmployeeSummary = computed(
+  () => `${selectedEmployeeName.value}: ${filteredShifts.value.length} смен`,
 )
 
-const totalHoursSelected = computed(() => {
-  if (selectedEmployee.value === 'all') return null
+const periodShifts = computed(() =>
+  baseShifts.value.filter((shift) => {
+    if (periodStart.value && shift.date < periodStart.value) return false
+    if (periodEnd.value && shift.date > periodEnd.value) return false
+    return true
+  }),
+)
 
-  return filteredShifts.value.reduce(
-    (sum, shift) => sum + parseShiftHours(shift),
-    0,
+const periodEmployeeStats = computed(() => {
+  const stats = new Map()
+
+  periodShifts.value.forEach((shift) => {
+    const current = stats.get(shift.employee_name) || {
+      name: shift.employee_name,
+      shiftsCount: 0,
+      hours: 0,
+    }
+
+    current.shiftsCount += 1
+    current.hours += parseShiftHours(shift)
+    stats.set(shift.employee_name, current)
+  })
+
+  return Array.from(stats.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, 'ru'),
   )
 })
+
+const periodTotalHours = computed(() =>
+  periodEmployeeStats.value.reduce((sum, employee) => sum + employee.hours, 0),
+)
+
+const periodLabel = computed(() => {
+  if (!periodStart.value && !periodEnd.value) return 'Все даты'
+  if (periodStart.value && periodEnd.value) {
+    return `${formatDateLabel(periodStart.value)} - ${formatDateLabel(periodEnd.value)}`
+  }
+  if (periodStart.value) return `С ${formatDateLabel(periodStart.value)}`
+  return `До ${formatDateLabel(periodEnd.value)}`
+})
+
+const archiveTabs = computed(() => {
+  const tabs = [
+    { key: 'records', label: 'Отчеты' },
+    { key: 'shiftHistory', label: 'История' },
+    { key: 'shiftHours', label: 'Часы' },
+  ]
+
+  if (props.canViewAudit) {
+    tabs.push({ key: 'audit', label: 'Изменения' })
+  }
+
+  return tabs
+})
+
+const archiveViewIndex = computed(() => {
+  const index = archiveTabs.value.findIndex((tab) => tab.key === archiveView.value)
+  return index >= 0 ? index : 0
+})
+
+const formatDateTimeLabel = (value) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value || ''
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+const auditActionLabels = {
+  'product.create': 'Товар добавлен',
+  'product.update': 'Товар изменен',
+  'product.delete': 'Товар удален',
+  'shift.help_request': 'Заявка на помощь',
+  'shift.admin_create': 'Смена создана',
+  'shift.bulk_save': 'Изменения расписания',
+  'shift.book': 'Сотрудник записан',
+  'shift.unbook': 'Запись снята',
+  'shift.approve': 'Заявка подтверждена',
+  'shift.delete': 'Смена удалена',
+  'user.role_update': 'Роль пользователя изменена',
+}
+
+const auditEntityLabels = {
+  product: 'Ассортимент',
+  shift: 'График',
+  user: 'Пользователи',
+}
+
+const formatAuditAction = (action) => auditActionLabels[action] || action
+const formatAuditEntity = (entityType) => auditEntityLabels[entityType] || entityType
+
+const formatAuditSummary = (log) => {
+  if (log.action === 'shift.bulk_save') {
+    const deleted = Number(log.context?.deletedCount || 0)
+    const created = Number(log.context?.createdCount || 0)
+    return `Добавлено: ${created}, удалено: ${deleted}`
+  }
+
+  const source = log.after || log.before
+  if (source?.name) return source.name
+  if (source?.date && source?.start_time && source?.end_time) {
+    return `${source.date} • ${source.start_time}-${source.end_time}`
+  }
+
+  return ''
+}
+
+const recordsDaySections = computed(() =>
+  Object.entries(recordsHistory.value)
+    .sort(([a], [b]) => (a < b ? 1 : -1))
+    .map(([dateKey, rows]) => ({
+      key: dateKey,
+      dateLabel: formatDateLabel(dateKey),
+      weekDayLabel: formatRecordWeekday(dateKey),
+      rows,
+    })),
+)
+
+const visibleRecordsDaySections = computed(() =>
+  recordsDaySections.value.slice(0, visibleRecordDays.value),
+)
+
+const hasMoreRecordDays = computed(
+  () => visibleRecordsDaySections.value.length < recordsDaySections.value.length,
+)
+
+const updateActiveDate = (date) => {
+  if (activeDatePicker.value === 'start') {
+    periodStart.value = date
+    return
+  }
+
+  if (activeDatePicker.value === 'end') {
+    periodEnd.value = date
+  }
+}
 
 const loadRecords = async () => {
   recordsLoading.value = true
@@ -124,24 +316,72 @@ const loadRecords = async () => {
   try {
     const response = await recordsApi.archive()
     const rows = response.records || []
+    const grouped = {}
 
-    const groups = {}
     rows.forEach((record) => {
-      const dateLabel = formatDateLabel(record.created_at)
-      if (!groups[dateLabel]) groups[dateLabel] = []
+      const dateKey = getRecordDateKey(record.created_at)
+      if (!dateKey) return
+      if (!grouped[dateKey]) grouped[dateKey] = new Map()
 
-      if (!groups[dateLabel].find((item) => item.product_id === record.product_id)) {
-        groups[dateLabel].push(record)
+      const existing = grouped[dateKey].get(record.product_id)
+      const existingTime = existing ? new Date(existing.created_at).getTime() : -Infinity
+      const currentTime = new Date(record.created_at).getTime()
+      if (!existing || currentTime >= existingTime) {
+        grouped[dateKey].set(record.product_id, record)
       }
     })
 
-    recordsHistory.value = groups
+    const normalized = {}
+    Object.entries(grouped).forEach(([dateKey, byProduct]) => {
+      normalized[dateKey] = Array.from(byProduct.values()).sort((a, b) =>
+        (a.products?.name || '').localeCompare(b.products?.name || '', 'ru'),
+      )
+    })
+
+    recordsHistory.value = normalized
+    visibleRecordDays.value = 5
   } catch (error) {
     safeAlert(error?.message || 'Ошибка загрузки архива')
   } finally {
     recordsLoading.value = false
     recordsLoaded.value = true
   }
+}
+
+const loadMoreRecordDays = () => {
+  if (!hasMoreRecordDays.value) return
+  visibleRecordDays.value = Math.min(
+    visibleRecordDays.value + 5,
+    recordsDaySections.value.length,
+  )
+}
+
+const reconnectRecordsObserver = async () => {
+  if (recordsLoadObserver) {
+    recordsLoadObserver.disconnect()
+  }
+
+  if (
+    typeof window === 'undefined' ||
+    archiveView.value !== 'records' ||
+    !hasMoreRecordDays.value
+  ) {
+    return
+  }
+
+  await nextTick()
+  if (!recordsLoadMoreRef.value) return
+
+  recordsLoadObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadMoreRecordDays()
+      }
+    },
+    { root: null, rootMargin: '120px 0px', threshold: 0.1 },
+  )
+
+  recordsLoadObserver.observe(recordsLoadMoreRef.value)
 }
 
 const loadShifts = async () => {
@@ -158,119 +398,229 @@ const loadShifts = async () => {
   }
 }
 
-const togglePaid = async (shift) => {
-  const nextValue = !shift.is_paid
-  const previousValue = shift.is_paid
-
-  shift.is_paid = nextValue
+const loadAudit = async () => {
+  auditLoading.value = true
 
   try {
-    await shiftsApi.setPaid(shift.id, nextValue)
+    const response = await recordsApi.audit({ limit: 200, offset: 0 })
+    auditLogs.value = response.logs || []
   } catch (error) {
-    shift.is_paid = previousValue
-    safeAlert(error?.message || 'Не удалось обновить статус оплаты')
+    safeAlert(error?.message || 'Ошибка загрузки изменений')
+  } finally {
+    auditLoading.value = false
+    auditLoaded.value = true
   }
 }
 
-watch(archiveMode, async (mode) => {
-  if (mode === 'records' && !recordsLoaded.value) {
+watch(archiveView, async (view) => {
+  if (view === 'audit' && !props.canViewAudit) {
+    archiveView.value = 'records'
+    return
+  }
+
+  if (view === 'records' && !recordsLoaded.value) {
     await loadRecords()
   }
 
-  if (mode === 'shifts' && !shiftsLoaded.value) {
+  if ((view === 'shiftHistory' || view === 'shiftHours') && !shiftsLoaded.value) {
     await loadShifts()
   }
+
+  if (view === 'audit' && props.canViewAudit && !auditLoaded.value) {
+    await loadAudit()
+  }
+
+  await reconnectRecordsObserver()
+})
+
+watch(
+  () => props.canViewAudit,
+  (canViewAudit) => {
+    if (!canViewAudit && archiveView.value === 'audit') {
+      archiveView.value = 'records'
+    }
+  },
+)
+
+watch(recordsDaySections, async () => {
+  await reconnectRecordsObserver()
+})
+
+watch(hasMoreRecordDays, async () => {
+  await reconnectRecordsObserver()
 })
 
 onMounted(async () => {
+  setDefaultPeriod()
   await loadRecords()
   if (props.lockedMode) {
-    archiveMode.value = props.lockedMode
+    archiveView.value = normalizeArchiveView(props.lockedMode)
+  }
+  if (!props.canViewAudit && archiveView.value === 'audit') {
+    archiveView.value = 'records'
+  }
+  await reconnectRecordsObserver()
+})
+
+onBeforeUnmount(() => {
+  if (recordsLoadObserver) {
+    recordsLoadObserver.disconnect()
   }
 })
 </script>
 
 <template>
   <div class="space-y-4 pb-10">
-    <div v-if="!hideToggle" class="flex items-center gap-2 bg-white border border-slate-100 rounded-2xl p-1.5 shadow-sm">
+    <div
+      v-if="!hideToggle"
+      class="relative grid gap-1.5 bg-white border border-slate-100 rounded-2xl p-1.5 shadow-sm overflow-hidden"
+      :style="{ gridTemplateColumns: `repeat(${archiveTabs.length}, minmax(0, 1fr))` }"
+    >
+      <div
+        class="absolute top-1.5 bottom-1.5 left-1.5 rounded-xl bg-blue-600 shadow-lg shadow-blue-100 transition-transform duration-300 ease-out pointer-events-none"
+        :style="{
+          width: `calc((100% - ${(archiveTabs.length - 1) * 0.375 + 0.75}rem) / ${archiveTabs.length})`,
+          transform: `translateX(calc(${archiveViewIndex} * (100% + 0.375rem)))`,
+        }"
+        aria-hidden="true"
+      />
       <button
-        @click="archiveMode = 'records'"
-        :class="archiveMode === 'records' ? 'bg-blue-600 text-white' : 'text-slate-500'"
-        class="flex-1 text-[10px] font-black uppercase py-1.5 rounded-xl transition-colors"
+        v-for="tab in archiveTabs"
+        :key="tab.key"
+        @click="archiveView = tab.key"
+        :class="archiveView === tab.key ? 'text-white' : 'text-slate-400'"
+        class="relative z-10 text-[10px] font-black uppercase py-2 rounded-xl transition-colors duration-300"
       >
-        Остатки
-      </button>
-      <button
-        @click="archiveMode = 'shifts'"
-        :class="archiveMode === 'shifts' ? 'bg-blue-600 text-white' : 'text-slate-500'"
-        class="flex-1 text-[10px] font-black uppercase py-1.5 rounded-xl transition-colors"
-      >
-        Смены
+        {{ tab.label }}
       </button>
     </div>
 
-    <div v-if="archiveMode === 'records'">
+    <div v-if="archiveView === 'records'">
       <div v-if="recordsLoading" class="text-center py-10 font-bold text-slate-400 text-xs uppercase animate-pulse">
         Загрузка истории...
       </div>
 
-      <div v-else-if="Object.keys(recordsHistory).length === 0" class="text-center py-10 text-slate-400 text-xs font-bold uppercase">
+      <div
+        v-else-if="recordsDaySections.length === 0"
+        class="text-center py-10 text-slate-400 text-xs font-bold uppercase"
+      >
         Архив пуст
       </div>
 
-      <div v-for="(records, date) in recordsHistory" :key="date" class="bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
+      <div
+        v-for="section in visibleRecordsDaySections"
+        :key="section.key"
+        class="bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm"
+      >
         <div class="bg-slate-50 px-3 py-1.5 border-b border-slate-100 flex items-center gap-2">
-          <Calendar class="w-3.5 h-3.5 text-blue-500" />
-          <span class="text-[10px] font-black text-slate-600 uppercase tracking-tighter">{{ date }}</span>
+          <Calendar class="w-3.5 h-3.5 text-blue-600" />
+          <span class="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+            {{ section.dateLabel }} • {{ section.weekDayLabel }}
+          </span>
         </div>
+        <div class="p-2">
+          <table class="w-full table-fixed text-[10px]">
+            <thead>
+              <tr class="text-slate-400 uppercase text-[9px] font-black">
+                <th class="text-left px-2 py-1.5 w-[40%] border-b border-r border-slate-100">Продукт</th>
+                <th class="text-right px-2 py-1.5 w-[20%] border-b border-r border-slate-100">Поступило</th>
+                <th class="text-right px-2 py-1.5 w-[20%] border-b border-r border-slate-100">Осталось</th>
+                <th class="text-right px-2 py-1.5 w-[20%] border-b border-slate-100">Списалось</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="record in section.rows"
+                :key="record.id"
+                class="border-t border-slate-100 font-bold"
+              >
+                <td class="px-2 py-2 text-slate-800 truncate border-r border-slate-100">{{ record.products?.name || 'Удален' }}</td>
+                <td class="px-2 py-2 text-right text-blue-600 border-r border-slate-100">{{ record.arrival }}</td>
+                <td class="px-2 py-2 text-right text-slate-700 border-r border-slate-100">{{ record.remainder }}</td>
+                <td class="px-2 py-2 text-right text-red-500">{{ record.write_off }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-        <div class="p-2 space-y-1.5">
-          <div v-for="record in records" :key="record.id" class="flex justify-between items-center text-[11px] font-bold">
-            <span class="text-slate-700 truncate mr-2">{{ record.products?.name || 'Удален' }}</span>
-            <div class="flex gap-1.5 flex-shrink-0">
-              <span class="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">П:{{ record.arrival }}</span>
-              <span class="px-1.5 py-0.5 bg-green-50 text-green-600 rounded">О:{{ record.remainder }}</span>
-              <span class="px-1.5 py-0.5 bg-red-50 text-red-500 rounded">С:{{ record.write_off }}</span>
-            </div>
-          </div>
-        </div>
+      <div
+        v-if="hasMoreRecordDays"
+        ref="recordsLoadMoreRef"
+        class="py-2 text-center text-[10px] font-black uppercase text-slate-300"
+      >
+        Загружаем еще...
       </div>
     </div>
 
     <div v-else>
-      <div class="bg-white rounded-2xl p-2.5 border border-slate-100 shadow-sm space-y-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <Clock class="w-4 h-4 text-blue-500" />
-            <span class="text-[10px] font-black uppercase text-slate-600">Часы работы</span>
+      <div v-if="archiveView === 'shiftHistory'" class="bg-white rounded-2xl p-3 border border-slate-100 shadow-sm space-y-3">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <User class="w-4 h-4 text-blue-600" />
+            <span class="text-[10px] font-black uppercase text-slate-400">Сотрудник</span>
           </div>
-          <div class="text-[12px] font-black text-slate-800">{{ formatHours(totalHoursAll) }} ч</div>
+          <p class="text-sm font-black text-slate-800">{{ selectedEmployeeSummary }}</p>
         </div>
 
-        <div class="flex gap-2">
-          <div class="flex-1 bg-slate-50 rounded-xl px-2.5 py-1.5 border border-slate-100">
-            <label class="text-[9px] font-black uppercase text-slate-400">Сотрудник</label>
-            <div class="flex items-center gap-2 mt-1">
-              <User class="w-3.5 h-3.5 text-slate-400" />
-              <select v-model="selectedEmployee" class="w-full bg-transparent text-[11px] font-bold text-slate-700 outline-none">
-                <option value="all">Все</option>
-                <option v-for="employee in employees" :key="employee.key" :value="employee.key">
-                  {{ employee.name }}
-                </option>
-              </select>
-            </div>
-          </div>
+        <div class="flex gap-2 overflow-x-auto pb-1">
+          <button
+            @click="selectedEmployee = 'all'"
+            class="shrink-0 rounded-lg border px-3 py-2 text-left transition-all min-w-20"
+            :class="
+              selectedEmployee === 'all'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-slate-50 text-slate-500 border-slate-100'
+            "
+          >
+            <span class="block text-[10px] font-black uppercase">Все</span>
+            <span class="block text-xs font-black">{{ baseShifts.length }} смен</span>
+          </button>
 
           <button
-            @click="showPaid = !showPaid"
-            class="bg-slate-800 text-white text-[9px] font-black uppercase px-3 rounded-xl shadow-md"
+            v-for="employee in employees"
+            :key="employee.key"
+            @click="selectedEmployee = employee.key"
+            class="shrink-0 rounded-lg border px-3 py-2 text-left transition-all min-w-24"
+            :class="
+              selectedEmployee === employee.key
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-slate-50 text-slate-500 border-slate-100'
+            "
           >
-            {{ showPaid ? 'Скрыть оплач.' : 'Показать все' }}
+            <span class="block text-[10px] font-black uppercase max-w-28 truncate">{{ employee.name }}</span>
+            <span class="block text-xs font-black">{{ employee.count }} смен</span>
           </button>
         </div>
+      </div>
 
-        <div v-if="totalHoursSelected !== null" class="text-[10px] font-black text-slate-500 uppercase">
-          Итого по сотруднику: {{ formatHours(totalHoursSelected) }} ч
+      <div v-if="archiveView === 'shiftHours'" class="bg-white rounded-2xl p-3 border border-slate-100 shadow-sm space-y-3">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <Clock class="w-4 h-4 text-blue-600" />
+            <span class="text-[10px] font-black uppercase text-slate-400">Часы за период</span>
+          </div>
+          <p class="text-sm font-black text-slate-800">
+            {{ formatHours(periodTotalHours) }} ч • {{ periodShifts.length }} смен
+          </p>
+          <p class="text-[10px] font-bold text-slate-400 mt-0.5">{{ periodLabel }}</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <label
+            class="bg-slate-50 rounded-xl px-2.5 py-2 border border-slate-100 cursor-pointer"
+            @click.prevent="activeDatePicker = 'start'"
+          >
+            <span class="block text-[9px] font-black uppercase text-slate-400 mb-1">Начало</span>
+            <span class="block text-[11px] font-bold text-slate-800">{{ formatDateLabel(periodStart) }}</span>
+          </label>
+          <label
+            class="bg-slate-50 rounded-xl px-2.5 py-2 border border-slate-100 cursor-pointer"
+            @click.prevent="activeDatePicker = 'end'"
+          >
+            <span class="block text-[9px] font-black uppercase text-slate-400 mb-1">Конец</span>
+            <span class="block text-[11px] font-bold text-slate-800">{{ formatDateLabel(periodEnd) }}</span>
+          </label>
         </div>
       </div>
 
@@ -278,38 +628,110 @@ onMounted(async () => {
         Загрузка смен...
       </div>
 
-      <div v-else-if="groupedShiftHistory.length === 0" class="text-center py-10 text-slate-400 text-xs font-bold uppercase">
+      <div v-else-if="archiveView === 'shiftHistory' && groupedShiftHistory.length === 0" class="text-center py-10 text-slate-400 text-xs font-bold uppercase">
         Смен нет
       </div>
 
-      <div v-for="group in groupedShiftHistory" :key="group.label" class="bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
-        <div class="bg-slate-50 px-3 py-1.5 border-b border-slate-100 flex items-center gap-2">
-          <Calendar class="w-3.5 h-3.5 text-blue-500" />
-          <span class="text-[10px] font-black text-slate-600 uppercase tracking-tighter">{{ group.label }}</span>
+      <div v-else-if="archiveView === 'shiftHours' && periodEmployeeStats.length === 0" class="text-center py-10 text-slate-400 text-xs font-bold uppercase">
+        В этом периоде смен нет
+      </div>
+      <div v-else-if="archiveView === 'audit' && !auditLoading && auditLogs.length === 0" class="text-center py-10 text-slate-400 text-xs font-bold uppercase">
+        Изменений пока нет
+      </div>
+
+      <template v-if="archiveView === 'shiftHistory'">
+        <div v-for="group in groupedShiftHistory" :key="group.label" class="space-y-2">
+          <div class="px-1 flex items-center gap-2">
+            <Calendar class="w-3.5 h-3.5 text-blue-600" />
+            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">{{ group.label }}</span>
+          </div>
+          <div class="space-y-1.5">
+            <div
+              v-for="shift in group.items"
+              :key="shift.id"
+              class="bg-white border border-slate-100 rounded-xl p-3 shadow-sm"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-black text-slate-800 truncate">
+                    {{ formatShiftDay(shift.date) }}
+                  </div>
+                  <div class="text-[10px] text-slate-400 font-black uppercase">
+                    {{ formatShiftWeekday(shift.date) }}
+                    <span v-if="selectedEmployee === 'all'"> • {{ shift.employee_name }}</span>
+                  </div>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 text-right shrink-0">
+                  <div class="text-[12px] font-black text-slate-800">
+                    {{ shift.start_time }}–{{ shift.end_time }}
+                  </div>
+                  <div class="text-[9px] font-black text-blue-600 uppercase flex items-center justify-end gap-1">
+                    <Clock class="w-3 h-3" />
+                    смена
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="p-2 space-y-1.5">
-          <div v-for="shift in group.items" :key="shift.id" class="flex items-center justify-between text-[11px] font-bold">
+      </template>
+
+      <div v-if="archiveView === 'shiftHours' && periodEmployeeStats.length > 0" class="space-y-2">
+        <div
+          v-for="employee in periodEmployeeStats"
+          :key="employee.name"
+          class="bg-white border border-slate-100 rounded-xl p-3 shadow-sm"
+        >
+          <div class="flex items-center justify-between gap-3">
             <div class="min-w-0">
-              <div class="text-slate-700 truncate">{{ shift.employee_name }}</div>
-              <div class="text-[10px] text-slate-400 font-black">
-                {{ shift.start_time }}–{{ shift.end_time }} • {{ formatHours(parseShiftHours(shift)) }} ч
+              <div class="text-[13px] font-black text-slate-800 truncate">
+                {{ employee.name }}
+              </div>
+              <div class="text-[10px] text-slate-400 font-black uppercase">
+                {{ employee.shiftsCount }} смен
               </div>
             </div>
 
-            <div class="flex items-center gap-2 flex-shrink-0">
-              <span v-if="shift.is_paid" class="px-1.5 py-0.5 bg-green-50 text-green-600 rounded text-[9px] font-black uppercase">Оплачено</span>
-              <button
-                @click="togglePaid(shift)"
-                class="px-2 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1"
-                :class="shift.is_paid ? 'bg-slate-100 text-slate-500' : 'bg-blue-50 text-blue-700'"
-              >
-                <Check class="w-3 h-3" />
-                {{ shift.is_paid ? 'Вернуть' : 'В счет' }}
-              </button>
+            <div class="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-right shrink-0">
+              <div class="text-base font-black text-blue-600">
+                {{ formatHours(employee.hours) }} ч
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      <div v-if="archiveView === 'audit'" class="space-y-2">
+        <div v-if="auditLoading" class="text-center py-10 font-bold text-slate-400 text-xs uppercase animate-pulse">
+          Загрузка изменений...
+        </div>
+
+        <div
+          v-for="log in auditLogs"
+          :key="log.id"
+          class="bg-white border border-slate-100 rounded-xl p-3 shadow-sm"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] font-black text-slate-800 uppercase">{{ formatAuditAction(log.action) }}</p>
+            <p class="text-[9px] font-black text-slate-400">{{ formatDateTimeLabel(log.created_at) }}</p>
+          </div>
+          <p class="text-[10px] font-black text-blue-600 mt-1 uppercase">
+            {{ log.actor_name }} • {{ formatAuditEntity(log.entity_type) }}<span v-if="log.entity_id"> #{{ log.entity_id }}</span>
+          </p>
+          <p v-if="formatAuditSummary(log)" class="text-[10px] font-bold text-slate-500 mt-1">
+            {{ formatAuditSummary(log) }}
+          </p>
+        </div>
+      </div>
     </div>
+
+    <DatePickerSheet
+      v-if="activeDatePicker"
+      :modelValue="activeDatePicker === 'start' ? periodStart : periodEnd"
+      :title="activeDatePicker === 'start' ? 'Начало периода' : 'Конец периода'"
+      @update:modelValue="updateActiveDate"
+      @close="activeDatePicker = ''"
+    />
   </div>
 </template>

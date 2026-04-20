@@ -9,7 +9,8 @@
     "dev:all": "node server/index.js & vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "reset-password": "node scripts/reset-password.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
