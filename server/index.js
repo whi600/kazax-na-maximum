@@ -9,7 +9,11 @@ const PORT = Number(process.env.PORT || 8787)
 const SESSION_COOKIE = 'kof_session'
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30
 const MAX_BODY_SIZE = 1024 * 1024
+const MAX_UPLOAD_BODY_SIZE = 12 * 1024 * 1024
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
 const SUPER_ADMIN_EMAIL = 'misakurnikov942@gmail.com'
+const uploadsDir = path.resolve(process.cwd(), 'data', 'uploads')
+fs.mkdirSync(uploadsDir, { recursive: true })
 
 const adminEmails = new Set(
   String(process.env.ADMIN_EMAILS || '')
@@ -30,6 +34,31 @@ const mimeTypes = {
   '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 }
+const allowedAttachmentMimeTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'application/pdf',
+  'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+])
+const allowedAttachmentExtensions = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.pdf',
+  '.txt',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+])
 
 const distDir = path.resolve(process.cwd(), 'dist')
 const hasDist = fs.existsSync(distDir)
@@ -268,6 +297,154 @@ const listAuditLogStatement = db.prepare(`
   LIMIT ?
   OFFSET ?
 `)
+const listUsersForMessengerStatement = db.prepare(`
+  SELECT id, email, name, role, created_at
+  FROM users
+  ORDER BY name COLLATE NOCASE ASC, email ASC
+`)
+const getConversationByDirectKeyStatement = db.prepare(
+  'SELECT id, type, title, direct_key, created_by, created_at, updated_at FROM conversations WHERE direct_key = ?',
+)
+const getConversationByIdStatement = db.prepare(
+  'SELECT id, type, title, direct_key, created_by, created_at, updated_at FROM conversations WHERE id = ?',
+)
+const createConversationStatement = db.prepare(`
+  INSERT INTO conversations(type, title, direct_key, created_by, updated_at)
+  VALUES (?, ?, ?, ?, datetime('now'))
+`)
+const addConversationMemberStatement = db.prepare(`
+  INSERT OR IGNORE INTO conversation_members(conversation_id, user_id)
+  VALUES (?, ?)
+`)
+const isConversationMemberStatement = db.prepare(`
+  SELECT 1 AS ok
+  FROM conversation_members
+  WHERE conversation_id = ? AND user_id = ?
+`)
+const listUserConversationsStatement = db.prepare(`
+  SELECT
+    c.id,
+    c.type,
+    c.title,
+    c.direct_key,
+    c.created_at,
+    c.updated_at,
+    lm.id AS last_message_id,
+    lm.body AS last_message_body,
+    lm.created_at AS last_message_created_at,
+    sender.id AS last_sender_id,
+    sender.name AS last_sender_name
+  FROM conversations c
+  JOIN conversation_members cm ON cm.conversation_id = c.id
+  LEFT JOIN messages lm ON lm.id = (
+    SELECT m.id
+    FROM messages m
+    WHERE m.conversation_id = c.id
+    ORDER BY m.created_at DESC, m.id DESC
+    LIMIT 1
+  )
+  LEFT JOIN users sender ON sender.id = lm.sender_user_id
+  WHERE cm.user_id = ?
+  ORDER BY c.updated_at DESC, c.id DESC
+`)
+const listConversationMembersStatement = db.prepare(`
+  SELECT u.id, u.email, u.name, u.role
+  FROM conversation_members cm
+  JOIN users u ON u.id = cm.user_id
+  WHERE cm.conversation_id = ?
+  ORDER BY u.name COLLATE NOCASE ASC
+`)
+const listMessagesStatement = db.prepare(`
+  SELECT
+    m.id,
+    m.conversation_id,
+    m.sender_user_id,
+    m.body,
+    m.created_at,
+    u.name AS sender_name,
+    u.email AS sender_email
+  FROM messages m
+  LEFT JOIN users u ON u.id = m.sender_user_id
+  WHERE m.conversation_id = ?
+    AND m.id IN (
+      SELECT id
+      FROM messages
+      WHERE conversation_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    )
+  ORDER BY m.created_at ASC, m.id ASC
+`)
+const getMessageByIdStatement = db.prepare(`
+  SELECT
+    m.id,
+    m.conversation_id,
+    m.sender_user_id,
+    m.body,
+    m.created_at,
+    u.name AS sender_name,
+    u.email AS sender_email
+  FROM messages m
+  LEFT JOIN users u ON u.id = m.sender_user_id
+  WHERE m.id = ?
+`)
+const listAttachmentsForConversationStatement = db.prepare(`
+  SELECT
+    ma.id,
+    ma.message_id,
+    ma.original_name,
+    ma.stored_name,
+    ma.mime_type,
+    ma.size,
+    ma.created_at
+  FROM message_attachments ma
+  JOIN messages m ON m.id = ma.message_id
+  WHERE m.conversation_id = ?
+`)
+const listAttachmentsForMessageStatement = db.prepare(`
+  SELECT
+    id,
+    message_id,
+    original_name,
+    stored_name,
+    mime_type,
+    size,
+    created_at
+  FROM message_attachments
+  WHERE message_id = ?
+`)
+const insertMessageStatement = db.prepare(`
+  INSERT INTO messages(conversation_id, sender_user_id, body)
+  VALUES (?, ?, ?)
+`)
+const insertAttachmentStatement = db.prepare(`
+  INSERT INTO message_attachments(
+    message_id,
+    original_name,
+    stored_name,
+    mime_type,
+    size,
+    storage_path
+  )
+  VALUES (?, ?, ?, ?, ?, ?)
+`)
+const updateConversationTimestampStatement = db.prepare(
+  "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?",
+)
+const getAttachmentByIdStatement = db.prepare(`
+  SELECT
+    ma.id,
+    ma.message_id,
+    ma.original_name,
+    ma.stored_name,
+    ma.mime_type,
+    ma.size,
+    ma.storage_path,
+    m.conversation_id
+  FROM message_attachments ma
+  JOIN messages m ON m.id = ma.message_id
+  WHERE ma.id = ?
+`)
 
 const sanitizeUser = (row) => {
   if (!row) return null
@@ -384,6 +561,177 @@ const readJsonBody = (req) =>
 
     req.on('error', reject)
   })
+
+const readBufferBody = (req, maxSize = MAX_UPLOAD_BODY_SIZE) =>
+  new Promise((resolve, reject) => {
+    let total = 0
+    const chunks = []
+
+    req.on('data', (chunk) => {
+      total += chunk.length
+      if (total > maxSize) {
+        reject(new Error('Request body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+
+    req.on('end', () => {
+      resolve(Buffer.concat(chunks))
+    })
+
+    req.on('error', reject)
+  })
+
+const parseContentDisposition = (value) => {
+  const result = {}
+  String(value || '')
+    .split(';')
+    .map((part) => part.trim())
+    .forEach((part) => {
+      const [key, ...rest] = part.split('=')
+      if (!key || rest.length === 0) return
+      result[key.toLowerCase()] = rest.join('=').replace(/^"|"$/g, '')
+    })
+  return result
+}
+
+const parseMultipartBody = async (req) => {
+  const contentType = String(req.headers['content-type'] || '')
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
+  const boundary = boundaryMatch?.[1] || boundaryMatch?.[2]
+  if (!boundary) throw new Error('Missing multipart boundary')
+
+  const body = await readBufferBody(req)
+  const boundaryBuffer = Buffer.from(`--${boundary}`)
+  const fieldMap = {}
+  const files = []
+  let cursor = body.indexOf(boundaryBuffer)
+
+  while (cursor >= 0) {
+    cursor += boundaryBuffer.length
+    const marker = body.subarray(cursor, cursor + 2).toString('utf8')
+    if (marker === '--') break
+    if (marker === '\r\n') cursor += 2
+
+    const headerEnd = body.indexOf(Buffer.from('\r\n\r\n'), cursor)
+    if (headerEnd < 0) break
+
+    const rawHeaders = body.subarray(cursor, headerEnd).toString('utf8')
+    const headers = rawHeaders.split('\r\n').reduce((acc, line) => {
+      const separator = line.indexOf(':')
+      if (separator < 0) return acc
+      acc[line.slice(0, separator).trim().toLowerCase()] = line
+        .slice(separator + 1)
+        .trim()
+      return acc
+    }, {})
+
+    const nextBoundary = body.indexOf(boundaryBuffer, headerEnd + 4)
+    if (nextBoundary < 0) break
+
+    let content = body.subarray(headerEnd + 4, nextBoundary)
+    if (content.length >= 2 && content.subarray(content.length - 2).toString('utf8') === '\r\n') {
+      content = content.subarray(0, content.length - 2)
+    }
+
+    const disposition = parseContentDisposition(headers['content-disposition'])
+    if (disposition.filename) {
+      files.push({
+        fieldName: disposition.name || 'attachment',
+        originalName: disposition.filename,
+        mimeType: headers['content-type'] || 'application/octet-stream',
+        buffer: content,
+      })
+    } else if (disposition.name) {
+      fieldMap[disposition.name] = content.toString('utf8')
+    }
+
+    cursor = nextBoundary
+  }
+
+  return { fields: fieldMap, files }
+}
+
+const sanitizeUploadName = (value) => {
+  const fallback = 'file'
+  return (
+    path
+      .basename(String(value || fallback))
+      .replace(/[^\w.\-а-яА-ЯёЁ ]/g, '_')
+      .trim() || fallback
+  )
+}
+
+const extensionForMimeType = (mimeType) => {
+  if (mimeType === 'image/jpeg') return '.jpg'
+  if (mimeType === 'image/png') return '.png'
+  if (mimeType === 'image/webp') return '.webp'
+  if (mimeType === 'image/gif') return '.gif'
+  if (mimeType === 'application/pdf') return '.pdf'
+  if (mimeType === 'text/plain') return '.txt'
+  if (mimeType.includes('wordprocessingml')) return '.docx'
+  if (mimeType.includes('spreadsheetml')) return '.xlsx'
+  if (mimeType === 'application/msword') return '.doc'
+  if (mimeType === 'application/vnd.ms-excel') return '.xls'
+  return ''
+}
+
+const mimeTypeForExtension = (extension) => {
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
+  if (extension === '.png') return 'image/png'
+  if (extension === '.webp') return 'image/webp'
+  if (extension === '.gif') return 'image/gif'
+  if (extension === '.pdf') return 'application/pdf'
+  if (extension === '.txt') return 'text/plain'
+  if (extension === '.doc') return 'application/msword'
+  if (extension === '.docx') {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  }
+  if (extension === '.xls') return 'application/vnd.ms-excel'
+  if (extension === '.xlsx') {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  }
+  return ''
+}
+
+const prepareAttachmentUpload = (file) => {
+  if (!file || file.buffer.length === 0) return null
+  if (file.buffer.length > MAX_ATTACHMENT_SIZE) {
+    throw new Error('Файл больше 10 МБ')
+  }
+
+  const originalName = sanitizeUploadName(file.originalName)
+  const originalExt = path.extname(originalName).toLowerCase().slice(0, 12)
+  const rawMimeType = String(file.mimeType || '').toLowerCase()
+  const mimeType = rawMimeType || 'application/octet-stream'
+  const genericMimeType = mimeType === 'application/octet-stream'
+  const allowedByMime = allowedAttachmentMimeTypes.has(mimeType)
+  const allowedByExtension =
+    genericMimeType && allowedAttachmentExtensions.has(originalExt)
+
+  if (!allowedByMime && !allowedByExtension) {
+    throw new Error('Этот тип файла пока нельзя отправить')
+  }
+
+  const normalizedMimeType = allowedByMime
+    ? mimeType
+    : mimeTypeForExtension(originalExt) || 'application/octet-stream'
+  const safeOriginalExt = allowedAttachmentExtensions.has(originalExt) ? originalExt : ''
+  const extension = safeOriginalExt || extensionForMimeType(normalizedMimeType)
+  const storedName = `${randomBytes(16).toString('hex')}${extension}`
+  const storagePath = storedName
+
+  return {
+    originalName,
+    storedName,
+    mimeType: normalizedMimeType,
+    size: file.buffer.length,
+    storagePath,
+    buffer: file.buffer,
+  }
+}
 
 const hashPassword = (password) => {
   const salt = randomBytes(16).toString('hex')
@@ -585,6 +933,135 @@ const normalizePersonName = (value) =>
   String(value || '')
     .trim()
     .toLowerCase()
+
+const parseConversationMessagesPath = (pathname) => {
+  const match = pathname.match(/^\/api\/messenger\/conversations\/(\d+)\/messages$/)
+  if (!match) return null
+  return Number(match[1])
+}
+
+const parseConversationMembersPath = (pathname) => {
+  const match = pathname.match(/^\/api\/messenger\/conversations\/(\d+)\/members$/)
+  if (!match) return null
+  return Number(match[1])
+}
+
+const parseAttachmentPath = (pathname) => {
+  const match = pathname.match(/^\/api\/messenger\/attachments\/(\d+)$/)
+  if (!match) return null
+  return Number(match[1])
+}
+
+const makeDirectConversationKey = (firstUserId, secondUserId) => {
+  const ids = [Number(firstUserId), Number(secondUserId)].sort((a, b) => a - b)
+  return `${ids[0]}:${ids[1]}`
+}
+
+const normalizeGroupTitle = (value) => String(value || '').trim().slice(0, 80)
+
+const normalizeMemberIds = (value, currentUserId) => {
+  const source = Array.isArray(value) ? value : []
+  const ids = new Set()
+
+  for (const item of source) {
+    const id = Number(item)
+    if (!Number.isFinite(id) || id <= 0 || id === currentUserId) continue
+    ids.add(id)
+  }
+
+  return [...ids].slice(0, 50)
+}
+
+const mapMessengerUser = (row) => ({
+  id: row.id,
+  email: row.email,
+  name: row.name,
+  role: row.role,
+  created_at: row.created_at,
+})
+
+const conversationToDto = (row, currentUser) => {
+  const members = listConversationMembersStatement.all(row.id).map(mapMessengerUser)
+  const otherMember = members.find((member) => member.id !== currentUser.id) || members[0]
+  const displayTitle =
+    row.type === 'direct'
+      ? otherMember?.name || otherMember?.email || 'Диалог'
+      : row.title || 'Диалог'
+
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    displayTitle,
+    direct_key: row.direct_key,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    members,
+    lastMessage: row.last_message_id
+      ? {
+          id: row.last_message_id,
+          body: row.last_message_body,
+          created_at: row.last_message_created_at,
+          sender: {
+            id: row.last_sender_id,
+            name: row.last_sender_name,
+          },
+        }
+      : null,
+  }
+}
+
+const attachmentToDto = (row) => ({
+  id: row.id,
+  message_id: row.message_id,
+  original_name: row.original_name,
+  mime_type: row.mime_type,
+  size: row.size,
+  created_at: row.created_at,
+  url: `/api/messenger/attachments/${row.id}`,
+})
+
+const messageToDto = (row, attachments = []) => ({
+  id: row.id,
+  conversation_id: row.conversation_id,
+  sender_user_id: row.sender_user_id,
+  sender_name: row.sender_name || row.sender_email || 'Пользователь',
+  sender_email: row.sender_email,
+  body: row.body || '',
+  created_at: row.created_at,
+  attachments: attachments.map(attachmentToDto),
+})
+
+const listMessageDtos = (conversationId, limit) => {
+  const messageRows = listMessagesStatement.all(conversationId, conversationId, limit)
+  const attachmentsByMessage = new Map()
+
+  for (const attachment of listAttachmentsForConversationStatement.all(conversationId)) {
+    const list = attachmentsByMessage.get(attachment.message_id) || []
+    list.push(attachment)
+    attachmentsByMessage.set(attachment.message_id, list)
+  }
+
+  return messageRows.map((row) =>
+    messageToDto(row, attachmentsByMessage.get(row.id) || []),
+  )
+}
+
+const ensureConversationMember = (conversationId, user, res) => {
+  const conversation = getConversationByIdStatement.get(conversationId)
+  if (!conversation) {
+    notFound(res, 'Диалог не найден')
+    return null
+  }
+
+  const member = isConversationMemberStatement.get(conversationId, user.id)
+  if (!member) {
+    forbidden(res, 'У вас нет доступа к этому диалогу')
+    return null
+  }
+
+  return conversation
+}
 
 const appServer = http.createServer((req, res) => {
   withErrorHandling(res, async () => {
@@ -1258,6 +1735,312 @@ const appServer = http.createServer((req, res) => {
         lastChangedAt: state?.last_changed_at || null,
         lastChangedBy: state?.last_changed_by || null,
       })
+      return
+    }
+
+    if (pathname === '/api/messenger/users' && req.method === 'GET') {
+      const user = requireUser(req, res)
+      if (!user) return
+
+      const users = listUsersForMessengerStatement
+        .all()
+        .filter((row) => row.id !== user.id)
+        .map(mapMessengerUser)
+
+      json(res, 200, { users })
+      return
+    }
+
+    if (pathname === '/api/messenger/conversations' && req.method === 'GET') {
+      const user = requireUser(req, res)
+      if (!user) return
+
+      const conversations = listUserConversationsStatement
+        .all(user.id)
+        .map((row) => conversationToDto(row, user))
+
+      json(res, 200, { conversations })
+      return
+    }
+
+    if (pathname === '/api/messenger/conversations/direct' && req.method === 'POST') {
+      const user = requireUser(req, res)
+      if (!user) return
+
+      const body = await readJsonBody(req)
+      const targetUserId = Number(body.userId)
+      if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+        badRequest(res, 'Выберите пользователя')
+        return
+      }
+      if (targetUserId === user.id) {
+        badRequest(res, 'Нельзя создать диалог с самим собой')
+        return
+      }
+
+      const targetUser = getUserByIdStatement.get(targetUserId)
+      if (!targetUser) {
+        notFound(res, 'Пользователь не найден')
+        return
+      }
+
+      const directKey = makeDirectConversationKey(user.id, targetUserId)
+      let conversation = getConversationByDirectKeyStatement.get(directKey)
+
+      if (!conversation) {
+        db.exec('BEGIN')
+        try {
+          const result = createConversationStatement.run(
+            'direct',
+            null,
+            directKey,
+            user.id,
+          )
+          const conversationId = Number(result.lastInsertRowid)
+          addConversationMemberStatement.run(conversationId, user.id)
+          addConversationMemberStatement.run(conversationId, targetUserId)
+          db.exec('COMMIT')
+          conversation = getConversationByIdStatement.get(conversationId)
+        } catch (error) {
+          db.exec('ROLLBACK')
+          throw error
+        }
+      }
+
+      json(res, 200, { conversation: conversationToDto(conversation, user) })
+      return
+    }
+
+    if (pathname === '/api/messenger/conversations/group' && req.method === 'POST') {
+      const user = requireUser(req, res)
+      if (!user) return
+
+      const body = await readJsonBody(req)
+      const title = normalizeGroupTitle(body.title)
+      const memberIds = normalizeMemberIds(body.memberIds, user.id)
+
+      if (!title) {
+        badRequest(res, 'Укажите название группы')
+        return
+      }
+      if (memberIds.length === 0) {
+        badRequest(res, 'Добавьте хотя бы одного участника')
+        return
+      }
+
+      for (const memberId of memberIds) {
+        const member = getUserByIdStatement.get(memberId)
+        if (!member) {
+          badRequest(res, 'В списке есть пользователь, которого уже нет')
+          return
+        }
+      }
+
+      let conversationId = null
+      db.exec('BEGIN')
+      try {
+        const result = createConversationStatement.run('group', title, null, user.id)
+        conversationId = Number(result.lastInsertRowid)
+        addConversationMemberStatement.run(conversationId, user.id)
+        for (const memberId of memberIds) {
+          addConversationMemberStatement.run(conversationId, memberId)
+        }
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+
+      const conversation = getConversationByIdStatement.get(conversationId)
+      json(res, 201, { conversation: conversationToDto(conversation, user) })
+      return
+    }
+
+    const messengerMembersConversationId = parseConversationMembersPath(pathname)
+    if (messengerMembersConversationId && req.method === 'POST') {
+      const user = requireUser(req, res)
+      if (!user) return
+
+      const conversation = ensureConversationMember(messengerMembersConversationId, user, res)
+      if (!conversation) return
+      if (conversation.type !== 'group') {
+        badRequest(res, 'Участников можно добавлять только в группу')
+        return
+      }
+
+      const body = await readJsonBody(req)
+      const memberIds = normalizeMemberIds(body.memberIds, user.id)
+      if (memberIds.length === 0) {
+        badRequest(res, 'Выберите участников')
+        return
+      }
+
+      for (const memberId of memberIds) {
+        const member = getUserByIdStatement.get(memberId)
+        if (!member) {
+          badRequest(res, 'В списке есть пользователь, которого уже нет')
+          return
+        }
+      }
+
+      db.exec('BEGIN')
+      try {
+        for (const memberId of memberIds) {
+          addConversationMemberStatement.run(messengerMembersConversationId, memberId)
+        }
+        updateConversationTimestampStatement.run(messengerMembersConversationId)
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+
+      const updatedConversation = getConversationByIdStatement.get(
+        messengerMembersConversationId,
+      )
+      json(res, 200, { conversation: conversationToDto(updatedConversation, user) })
+      return
+    }
+
+    const messengerConversationId = parseConversationMessagesPath(pathname)
+    if (messengerConversationId && req.method === 'GET') {
+      const user = requireUser(req, res)
+      if (!user) return
+      const conversation = ensureConversationMember(messengerConversationId, user, res)
+      if (!conversation) return
+
+      const limit = Math.max(
+        1,
+        Math.min(200, parseInteger(requestUrl.searchParams.get('limit'), 100)),
+      )
+      json(res, 200, {
+        conversation: conversationToDto(conversation, user),
+        messages: listMessageDtos(messengerConversationId, limit),
+      })
+      return
+    }
+
+    if (messengerConversationId && req.method === 'POST') {
+      const user = requireUser(req, res)
+      if (!user) return
+      const conversation = ensureConversationMember(messengerConversationId, user, res)
+      if (!conversation) return
+
+      const contentType = String(req.headers['content-type'] || '').toLowerCase()
+      let bodyText = ''
+      let attachment = null
+
+      if (contentType.includes('multipart/form-data')) {
+        let parsed
+        try {
+          parsed = await parseMultipartBody(req)
+        } catch (error) {
+          badRequest(res, error?.message || 'Не удалось прочитать файл')
+          return
+        }
+
+        bodyText = parsed.fields.body || ''
+        const rawFile =
+          parsed.files.find((file) => file.fieldName === 'attachment') ||
+          parsed.files[0]
+
+        try {
+          attachment = prepareAttachmentUpload(rawFile)
+        } catch (error) {
+          badRequest(res, error?.message || 'Не удалось подготовить файл')
+          return
+        }
+      } else {
+        const body = await readJsonBody(req)
+        bodyText = body.body || ''
+      }
+
+      const messageBody = String(bodyText || '').trim()
+      if (!messageBody && !attachment) {
+        badRequest(res, 'Напишите сообщение или прикрепите файл')
+        return
+      }
+
+      let savedFilePath = null
+      let messageId = null
+      db.exec('BEGIN')
+      try {
+        const result = insertMessageStatement.run(
+          messengerConversationId,
+          user.id,
+          messageBody || null,
+        )
+        messageId = Number(result.lastInsertRowid)
+
+        if (attachment) {
+          savedFilePath = path.join(uploadsDir, attachment.storagePath)
+          fs.writeFileSync(savedFilePath, attachment.buffer, { flag: 'wx' })
+          insertAttachmentStatement.run(
+            messageId,
+            attachment.originalName,
+            attachment.storedName,
+            attachment.mimeType,
+            attachment.size,
+            attachment.storagePath,
+          )
+        }
+
+        updateConversationTimestampStatement.run(messengerConversationId)
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        if (savedFilePath) {
+          fs.rmSync(savedFilePath, { force: true })
+        }
+        throw error
+      }
+
+      const messageRow = getMessageByIdStatement.get(messageId)
+      const attachments = listAttachmentsForMessageStatement.all(messageId)
+
+      json(res, 201, {
+        conversation: conversationToDto(getConversationByIdStatement.get(messengerConversationId), user),
+        message: messageToDto(messageRow, attachments),
+      })
+      return
+    }
+
+    const attachmentId = parseAttachmentPath(pathname)
+    if (attachmentId && req.method === 'GET') {
+      const user = requireUser(req, res)
+      if (!user) return
+
+      const attachment = getAttachmentByIdStatement.get(attachmentId)
+      if (!attachment) {
+        notFound(res, 'Файл не найден')
+        return
+      }
+
+      const conversation = ensureConversationMember(attachment.conversation_id, user, res)
+      if (!conversation) return
+
+      const filePath = path.resolve(uploadsDir, attachment.storage_path)
+      const safeRoot = `${uploadsDir}${path.sep}`
+      if (!filePath.startsWith(safeRoot)) {
+        forbidden(res)
+        return
+      }
+      if (!fs.existsSync(filePath)) {
+        notFound(res, 'Файл не найден на диске')
+        return
+      }
+
+      const stat = fs.statSync(filePath)
+      const fallbackName = sanitizeUploadName(attachment.original_name)
+        .replace(/[^\x20-\x7E]/g, '_')
+        .replace(/"/g, '')
+      res.writeHead(200, {
+        'Content-Type': attachment.mime_type || 'application/octet-stream',
+        'Content-Length': stat.size,
+        'Content-Disposition': `inline; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(attachment.original_name)}`,
+        'Cache-Control': 'private, no-store',
+      })
+      fs.createReadStream(filePath).pipe(res)
       return
     }
 

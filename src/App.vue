@@ -1,54 +1,29 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { authApi, editingApi, recordsApi } from './api'
-import ProductSelector from './components/ProductSelector.vue'
-import EntryCard from './components/EntryCard.vue'
+import { buildNavItems, getTabFromLocation, tabRoutes } from './navigation'
+import { defaultPermissionsByRole, permissionRows, roleLabels } from './permissions'
 import AdminArchive from './components/AdminArchive.vue'
 import ScheduleView from './components/ScheduleView.vue'
 import AuthView from './components/AuthView.vue'
-import NavIcon from './components/NavIcon.vue'
+import MessengerView from './components/MessengerView.vue'
+import AppHeader from './components/AppHeader.vue'
+import AppBottomNav from './components/AppBottomNav.vue'
+import ReportView from './components/ReportView.vue'
+import ProfileHomeView from './components/ProfileHomeView.vue'
+import AssortmentEditorView from './components/AssortmentEditorView.vue'
+import RoleSettingsView from './components/RoleSettingsView.vue'
 import {
   RotateCw,
-  LayoutGrid,
-  History,
-  ShoppingBasket,
-  ChefHat,
-  CalendarClock,
-  LogOut,
-  ShieldCheck,
-  UserRound,
-  Plus,
-  HandHelping,
-  Bell,
-  Pencil,
-  Trash2,
-  Check,
-  ArrowLeft,
-  Save,
-  SlidersHorizontal,
 } from 'lucide-vue-next'
 
-const tabRoutes = {
-  main: '/report',
-  schedule: '/schedule',
-  archive: '/archive',
-  profile: '/profile',
-}
 const SUPER_ADMIN_EMAIL = 'misakurnikov942@gmail.com'
-
-const routeTabs = Object.fromEntries(
-  Object.entries(tabRoutes).map(([tab, route]) => [route, tab]),
-)
-
-const getTabFromLocation = () => {
-  if (typeof window === 'undefined') return 'main'
-
-  const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
-  return routeTabs[normalizedPath] || 'main'
-}
 
 const activeTab = ref(getTabFromLocation())
 const scheduleViewRef = ref(null)
+const messengerViewRef = ref(null)
+const messengerSearchOpen = ref(false)
+const messengerSearchQuery = ref('')
 const schedulePendingCount = ref(0)
 const products = ref([])
 const dailyEntries = ref([])
@@ -86,49 +61,6 @@ const productForm = ref({
 
 const userRole = computed(() => currentUser.value?.role || null)
 const userName = computed(() => currentUser.value?.name || 'Сотрудник')
-const roleLabels = {
-  admin: 'Админ',
-  chef: 'Шеф',
-  employee: 'Сотрудник',
-}
-const permissionRows = [
-  { key: 'reportEdit', label: 'Редактирование отчета' },
-  { key: 'productsManage', label: 'Управление ассортиментом' },
-  { key: 'scheduleManage', label: 'Управление графиком' },
-  { key: 'auditView', label: 'Просмотр истории изменений' },
-  { key: 'rolesManage', label: 'Настройка ролей' },
-]
-
-const defaultPermissionsByRole = (role) => {
-  if (role === 'admin') {
-    return {
-      reportEdit: true,
-      productsManage: true,
-      scheduleManage: true,
-      auditView: true,
-      rolesManage: true,
-    }
-  }
-
-  if (role === 'chef') {
-    return {
-      reportEdit: true,
-      productsManage: false,
-      scheduleManage: false,
-      auditView: false,
-      rolesManage: false,
-    }
-  }
-
-  return {
-    reportEdit: true,
-    productsManage: false,
-    scheduleManage: false,
-    auditView: false,
-    rolesManage: false,
-  }
-}
-
 const userPermissions = computed(
   () => permissions.value || defaultPermissionsByRole(userRole.value),
 )
@@ -143,6 +75,7 @@ const canAccessArchive = computed(
 
 const pageTitle = computed(() => {
   if (activeTab.value === 'schedule') return 'График'
+  if (activeTab.value === 'messenger') return 'Сообщения'
   if (activeTab.value === 'archive') return 'Архив'
   if (activeTab.value === 'profile' && profileView.value === 'assortment') {
     return 'Ассортимент'
@@ -154,19 +87,7 @@ const pageTitle = computed(() => {
   return 'Отчет'
 })
 
-const navItems = computed(() => {
-  const items = [
-    { tab: 'main', label: 'Отчет', icon: 'report' },
-    { tab: 'schedule', label: 'График', icon: 'schedule' },
-  ]
-
-  if (canAccessArchive.value) {
-    items.push({ tab: 'archive', label: 'Архив', icon: 'archive' })
-  }
-
-  items.push({ tab: 'profile', label: 'Профиль', icon: 'profile' })
-  return items
-})
+const navItems = computed(() => buildNavItems(canAccessArchive.value))
 
 const updateRoute = (tab, replace = false) => {
   if (typeof window === 'undefined') return
@@ -215,6 +136,10 @@ const fetchAppData = async () => {
 const resetProductForm = () => {
   editingProductId.value = null
   productForm.value = { name: '', category: 'other', unit: 'шт' }
+}
+
+const updateProductFormField = (field, value) => {
+  productForm.value = { ...productForm.value, [field]: value }
 }
 
 const loadProducts = async () => {
@@ -324,6 +249,12 @@ const loadRoleUsers = async () => {
   }
 }
 
+const updateRoleUserDraft = (targetUser, role) => {
+  roleUsers.value = roleUsers.value.map((item) =>
+    item.id === targetUser.id ? { ...item, role } : item,
+  )
+}
+
 const changeUserRole = async (targetUser) => {
   if (!canEditUserRole(targetUser)) return
   if (targetUser.id === currentUser.value?.id && !isSuperAdmin.value) {
@@ -379,6 +310,13 @@ const onAddProduct = (product) => {
       write_off: null,
     })
   }
+}
+
+const removeReportEntry = (entry) => {
+  if (!canEditReport.value) return
+
+  const idx = dailyEntries.value.indexOf(entry)
+  if (idx > -1) dailyEntries.value.splice(idx, 1)
 }
 
 const buildReportPayload = () =>
@@ -660,29 +598,37 @@ const openScheduleRequests = () => {
   scheduleViewRef.value?.openPendingRequests()
 }
 
-const closeKeyboard = (event) => {
-  if (event.target.tagName !== 'INPUT') {
-    document.activeElement?.blur()
-  }
+const openMessengerSearch = () => {
+  messengerSearchOpen.value = true
+  messengerSearchQuery.value = ''
+  messengerViewRef.value?.closeConversation?.()
+  messengerViewRef.value?.openPeoplePanel?.()
 }
 
-const groupedEntries = computed(() => {
-  const groups = { bakery: [], pastry: [], other: [] }
+const closeMessengerSearch = () => {
+  messengerSearchOpen.value = false
+  messengerSearchQuery.value = ''
+  messengerViewRef.value?.closePeoplePanel?.()
+}
 
-  dailyEntries.value.forEach((entry) => {
-    if (entry.category === 'bakery' || entry.category === 'pastry') {
-      groups[entry.category].push(entry)
-    } else {
-      groups.other.push(entry)
-    }
-  })
+const closeKeyboard = (event) => {
+  const targetTag = event.target?.tagName
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(targetTag)) return
 
-  return groups
-})
+  const activeTag = document.activeElement?.tagName
+  if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)) return
+  document.activeElement?.blur()
+}
 
 watch(canAccessArchive, (allowed) => {
   if (activeTab.value === 'archive' && !allowed) {
     navigateTo('main', true)
+  }
+})
+
+watch(activeTab, (tab) => {
+  if (tab !== 'messenger') {
+    closeMessengerSearch()
   }
 })
 
@@ -739,10 +685,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="min-h-screen bg-slate-50 text-slate-800 pb-24 select-none touch-manipulation"
+    class="min-h-screen min-h-[100dvh] bg-slate-50 text-slate-800 pb-24 select-none touch-manipulation"
     @click="closeKeyboard"
   >
-    <div v-if="authLoading" class="flex min-h-screen items-center justify-center">
+    <div v-if="authLoading" class="flex min-h-screen min-h-[100dvh] items-center justify-center">
       <RotateCw class="w-7 h-7 animate-spin text-blue-600" />
     </div>
 
@@ -755,335 +701,78 @@ onBeforeUnmount(() => {
     />
 
     <template v-else>
-      <header
-        class="bg-white/95 backdrop-blur-md px-4 py-3 pt-safe sticky top-0 z-40 border-b border-slate-100 flex justify-between items-center shadow-sm"
-      >
-        <div>
-          <h1
-            class="text-xl font-black italic tracking-tighter text-slate-800 leading-none uppercase"
-          >
-            {{ pageTitle }}
-          </h1>
-          <p
-            class="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1"
-          >
-            Кофетерий
-          </p>
-        </div>
+      <AppHeader
+        v-if="activeTab !== 'profile'"
+        v-model:messenger-search-query="messengerSearchQuery"
+        :active-tab="activeTab"
+        :page-title="pageTitle"
+        :user-role="userRole"
+        :can-manage-schedule="canManageSchedule"
+        :schedule-pending-count="schedulePendingCount"
+        :messenger-search-open="messengerSearchOpen"
+        @open-messenger-search="openMessengerSearch"
+        @close-messenger-search="closeMessengerSearch"
+        @open-group-sheet="messengerViewRef?.openGroupSheet('create')"
+        @open-schedule-requests="openScheduleRequests"
+        @open-schedule-action="openScheduleAction"
+      />
 
-        <div v-if="activeTab === 'schedule' && userRole" class="flex items-center gap-2">
-          <button
-            v-if="canManageSchedule && schedulePendingCount > 0"
-            @click="openScheduleRequests"
-            class="relative bg-white text-blue-600 border border-blue-100 px-3 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
-          >
-            <Bell class="w-3.5 h-3.5 animate-swing" />
-            Заявки
-            <span class="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-black min-w-4 h-4 px-1 rounded-full flex items-center justify-center border-2 border-white">
-              {{ schedulePendingCount }}
-            </span>
-          </button>
-
-          <button
-            @click="openScheduleAction"
-            class="bg-blue-600 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-1.5 shadow-lg shadow-blue-200 active:scale-95 transition-all"
-          >
-            <Plus v-if="canManageSchedule" class="w-3.5 h-3.5" />
-            <HandHelping v-else class="w-3.5 h-3.5" />
-            {{ canManageSchedule ? 'Смена' : 'Помочь' }}
-          </button>
-        </div>
-      </header>
-
-      <main class="p-2">
+      <main :class="activeTab === 'profile' ? 'p-2 pt-safe' : 'p-2'">
         <div v-if="appLoading" class="flex justify-center py-10">
           <RotateCw class="w-6 h-6 animate-spin text-blue-600" />
         </div>
 
-        <div v-else-if="activeTab === 'profile'" class="p-2">
-          <section
+        <div v-else-if="activeTab === 'profile'" class="p-2 page-fade page-stack">
+          <ProfileHomeView
             v-if="profileView === 'main'"
-            class="bg-white border border-slate-100 rounded-lg p-5 shadow-sm"
-          >
-            <div class="flex items-center gap-3 mb-5">
-              <div class="w-12 h-12 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                <UserRound class="w-6 h-6" />
-              </div>
-              <div>
-                <h2 class="text-lg font-black text-slate-800">{{ userName }}</h2>
-                <p class="text-[10px] font-bold text-slate-400">{{ currentUser?.email }}</p>
-              </div>
-            </div>
+            :user-name="userName"
+            :email="currentUser?.email"
+            :role-label="roleLabels[userRole] || userRole"
+            :can-manage-products="canManageProducts"
+            :can-manage-roles="canManageRoles"
+            @open-assortment="profileView = 'assortment'"
+            @open-roles="profileView = 'roles'"
+            @logout="logout"
+          />
 
-            <div class="space-y-2 mb-5">
-              <div class="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-3">
-                <span class="text-[10px] font-black text-slate-400 uppercase">Роль</span>
-                <span class="text-[10px] font-black px-2 py-1 bg-blue-50 text-blue-600 rounded uppercase border border-blue-100 flex items-center gap-1">
-                  <ShieldCheck class="w-3 h-3" />
-                  {{ roleLabels[userRole] || userRole }}
-                </span>
-              </div>
-            </div>
-
-            <button
-              v-if="canManageProducts"
-              type="button"
-              @click="profileView = 'assortment'"
-              class="w-full mb-5 bg-blue-600 text-white py-3 rounded-lg text-[11px] font-black uppercase flex items-center justify-center gap-2 active:scale-95 transition-all"
-            >
-              <Pencil class="w-4 h-4" />
-              Редактировать ассортимент
-            </button>
-
-            <button
-              v-if="canManageRoles"
-              type="button"
-              @click="profileView = 'roles'"
-              class="w-full mb-5 bg-slate-900 text-white py-3 rounded-lg text-[11px] font-black uppercase flex items-center justify-center gap-2 active:scale-95 transition-all"
-            >
-              <SlidersHorizontal class="w-4 h-4" />
-              Настроить роли и права
-            </button>
-
-            <button
-              @click="logout"
-              class="w-full bg-red-500 text-white py-3 rounded-lg text-[11px] font-black uppercase flex items-center justify-center gap-2 active:scale-95 transition-all"
-            >
-              <LogOut class="w-4 h-4" />
-              Выйти
-            </button>
-          </section>
-
-          <section
+          <AssortmentEditorView
             v-else-if="profileView === 'assortment'"
-            class="bg-white border border-slate-100 rounded-lg p-4 shadow-sm space-y-3"
-          >
-            <button
-              type="button"
-              @click="profileView = 'main'; resetProductForm()"
-              class="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1.5"
-            >
-              <ArrowLeft class="w-3.5 h-3.5" />
-              Назад в профиль
-            </button>
+            :products="products"
+            :form="productForm"
+            :editing-product-id="editingProductId"
+            :busy="productSaveBusy"
+            :editors-label="assortmentEditorsLabel"
+            :last-changed-label="assortmentLastChangedLabel"
+            @back="profileView = 'main'; resetProductForm()"
+            @update-field="updateProductFormField"
+            @save="saveProduct"
+            @reset="resetProductForm"
+            @edit-product="startEditProduct"
+            @remove-product="removeProduct"
+          />
 
-            <div
-              v-if="assortmentEditorsLabel"
-              class="rounded-lg border border-amber-100 bg-amber-50 text-amber-700 px-3 py-2 text-[10px] font-black uppercase"
-            >
-              {{ assortmentEditorsLabel }}
-            </div>
-
-            <div
-              v-if="assortmentLastChangedLabel"
-              class="rounded-lg border border-slate-100 bg-slate-50 text-slate-500 px-3 py-2 text-[10px] font-black uppercase"
-            >
-              {{ assortmentLastChangedLabel }}
-            </div>
-
-            <div class="grid grid-cols-12 gap-2">
-              <input
-                v-model="productForm.name"
-                type="text"
-                placeholder="Название"
-                class="col-span-6 bg-slate-50 border border-slate-100 rounded-lg px-2 py-2 text-[11px] font-bold text-slate-800"
-              />
-              <select
-                v-model="productForm.category"
-                class="col-span-3 bg-slate-50 border border-slate-100 rounded-lg px-2 py-2 text-[11px] font-bold text-slate-800"
-              >
-                <option value="bakery">Выпечка</option>
-                <option value="pastry">Кондитерка</option>
-                <option value="other">Другое</option>
-              </select>
-              <input
-                v-model="productForm.unit"
-                type="text"
-                placeholder="Ед."
-                class="col-span-3 bg-slate-50 border border-slate-100 rounded-lg px-2 py-2 text-[11px] font-bold text-slate-800"
-              />
-            </div>
-
-            <div class="flex gap-2">
-              <button
-                type="button"
-                @click="saveProduct"
-                :disabled="productSaveBusy"
-                class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-              >
-                <Check class="w-3.5 h-3.5" />
-                {{ editingProductId ? 'Сохранить' : 'Добавить' }}
-              </button>
-              <button
-                v-if="editingProductId"
-                type="button"
-                @click="resetProductForm"
-                class="bg-slate-100 text-slate-600 px-3 py-2.5 rounded-lg text-[10px] font-black uppercase active:scale-95 transition-all"
-              >
-                Сброс
-              </button>
-            </div>
-
-            <div class="max-h-[60vh] overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-100">
-              <div
-                v-for="product in products"
-                :key="product.id"
-                class="flex items-center gap-2 px-2.5 py-2 bg-white"
-              >
-                <div class="min-w-0 flex-1">
-                  <p class="text-[11px] font-black text-slate-800 truncate">{{ product.name }}</p>
-                  <p class="text-[9px] font-black text-slate-400 uppercase">
-                    {{ product.category }} • {{ product.unit }}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  @click="startEditProduct(product)"
-                  class="text-blue-600 p-1.5 rounded-md active:scale-95 transition-all"
-                  aria-label="Редактировать товар"
-                >
-                  <Pencil class="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  @click="removeProduct(product)"
-                  class="text-red-500 p-1.5 rounded-md active:scale-95 transition-all"
-                  aria-label="Удалить товар"
-                >
-                  <Trash2 class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section
+          <RoleSettingsView
             v-else
-            class="bg-white border border-slate-100 rounded-lg p-4 shadow-sm space-y-3"
-          >
-            <button
-              type="button"
-              @click="profileView = 'main'"
-              class="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1.5"
-            >
-              <ArrowLeft class="w-3.5 h-3.5" />
-              Назад в профиль
-            </button>
-
-            <div
-              v-if="roleSettingsBusy && rolePermissions.length === 0"
-              class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-[10px] font-black uppercase text-slate-500"
-            >
-              Загрузка настроек...
-            </div>
-
-            <div
-              v-for="roleItem in rolePermissions.filter((row) => row.role === 'chef' || row.role === 'employee')"
-              :key="roleItem.role"
-              class="rounded-lg border border-slate-100 p-3 space-y-2"
-            >
-              <h3 class="text-[11px] font-black uppercase text-slate-800">
-                {{ roleLabels[roleItem.role] || roleItem.role }}
-              </h3>
-              <button
-                v-for="perm in permissionRows"
-                :key="`${roleItem.role}-${perm.key}`"
-                type="button"
-                @click="toggleRolePermission(roleItem.role, perm.key)"
-                class="w-full flex items-center justify-between rounded-lg border px-3 py-2 text-[10px] font-black uppercase transition-all"
-                :class="
-                  roleItem.permissions?.[perm.key]
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-slate-50 text-slate-500 border-slate-100'
-                "
-              >
-                <span>{{ perm.label }}</span>
-                <span
-                  class="inline-flex w-4 h-4 rounded border items-center justify-center"
-                  :class="roleItem.permissions?.[perm.key] ? 'border-white/70' : 'border-slate-300'"
-                >
-                  <Check v-if="roleItem.permissions?.[perm.key]" class="w-3 h-3" />
-                </span>
-              </button>
-            </div>
-
-            <button
-              type="button"
-              @click="saveRolePermissions"
-              :disabled="roleSettingsBusy"
-              class="w-full bg-blue-600 text-white py-3 rounded-lg text-[11px] font-black uppercase flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <Save class="w-4 h-4" />
-              Сохранить права
-            </button>
-
-            <div class="rounded-lg border border-slate-100 p-3 space-y-2">
-              <div class="flex items-center justify-between">
-                <h3 class="text-[11px] font-black uppercase text-slate-800">Пользователи и роли</h3>
-                <button
-                  type="button"
-                  @click="loadRoleUsers"
-                  class="text-[10px] font-black uppercase text-blue-600"
-                >
-                  Обновить
-                </button>
-              </div>
-
-              <p class="text-[9px] font-black uppercase text-slate-400">
-                Супер-админ: {{ SUPER_ADMIN_EMAIL }}
-              </p>
-
-              <div
-                v-if="roleUsersLoading && roleUsers.length === 0"
-                class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-[10px] font-black uppercase text-slate-500"
-              >
-                Загрузка пользователей...
-              </div>
-
-              <div class="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
-                <div
-                  v-for="u in roleUsers"
-                  :key="u.id"
-                  class="rounded-lg border border-slate-100 p-2.5 bg-white"
-                >
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="min-w-0">
-                      <p class="text-[11px] font-black text-slate-800 truncate">{{ u.name }}</p>
-                      <p class="text-[9px] font-black text-slate-400 truncate">{{ u.email }}</p>
-                    </div>
-                    <span
-                      v-if="u.isSuperAdmin"
-                      class="shrink-0 rounded-md border border-amber-200 bg-amber-50 text-amber-700 px-1.5 py-1 text-[8px] font-black uppercase"
-                    >
-                      Супер-админ
-                    </span>
-                  </div>
-
-                  <div class="mt-2 flex items-center gap-2">
-                    <select
-                      v-model="u.role"
-                      :disabled="!canEditUserRole(u) || roleUserUpdatingId === u.id"
-                      class="flex-1 bg-slate-50 border border-slate-100 rounded-lg px-2 py-2 text-[10px] font-black text-slate-700 uppercase disabled:opacity-60"
-                    >
-                      <option value="employee">Сотрудник</option>
-                      <option value="chef">Шеф</option>
-                      <option value="admin">Админ</option>
-                    </select>
-                    <button
-                      type="button"
-                      @click="changeUserRole(u)"
-                      :disabled="!canEditUserRole(u) || roleUserUpdatingId === u.id"
-                      class="bg-slate-900 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {{ roleUserUpdatingId === u.id ? '...' : 'Сменить' }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
+            :role-permissions="rolePermissions"
+            :permission-rows="permissionRows"
+            :role-users="roleUsers"
+            :role-labels="roleLabels"
+            :role-settings-busy="roleSettingsBusy"
+            :role-users-loading="roleUsersLoading"
+            :role-user-updating-id="roleUserUpdatingId"
+            :current-user-id="currentUser?.id"
+            :is-super-admin="isSuperAdmin"
+            :super-admin-email="SUPER_ADMIN_EMAIL"
+            @back="profileView = 'main'"
+            @toggle-permission="toggleRolePermission"
+            @save-permissions="saveRolePermissions"
+            @refresh-users="loadRoleUsers"
+            @update-user-role="updateRoleUserDraft"
+            @change-user-role="changeUserRole"
+          />
         </div>
 
-        <div v-else-if="activeTab === 'schedule'">
+        <div v-else-if="activeTab === 'schedule'" class="page-fade">
           <ScheduleView
             ref="scheduleViewRef"
             :userRole="userRole"
@@ -1094,8 +783,17 @@ onBeforeUnmount(() => {
           />
         </div>
 
+        <div v-else-if="activeTab === 'messenger'" class="page-fade">
+          <MessengerView
+            ref="messengerViewRef"
+            :currentUser="currentUser"
+            :people-search-query="messengerSearchQuery"
+            @person-selected="closeMessengerSearch"
+          />
+        </div>
+
         <div v-else>
-          <div v-if="activeTab === 'archive' && canAccessArchive">
+          <div v-if="activeTab === 'archive' && canAccessArchive" class="page-fade">
             <AdminArchive
               :lockedMode="!canViewAudit && userRole === 'chef' ? 'records' : ''"
               :hideToggle="!canViewAudit && userRole === 'chef'"
@@ -1103,90 +801,23 @@ onBeforeUnmount(() => {
             />
           </div>
 
-          <div v-else class="space-y-4">
-            <div class="space-y-4">
-              <ProductSelector
-                :products="products"
-                :dailyEntries="dailyEntries"
-                :disabled="!canEditReport"
-                @add="onAddProduct"
-              />
-
-              <div v-for="(items, cat) in groupedEntries" :key="cat" class="space-y-1">
-                <h3
-                  v-if="items.length"
-                  class="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] pt-2 pb-1 ml-1 flex items-center gap-1"
-                >
-                  <component
-                    :is="
-                      cat === 'bakery'
-                        ? ShoppingBasket
-                        : cat === 'pastry'
-                          ? ChefHat
-                          : LayoutGrid
-                    "
-                    class="w-2.5 h-2.5"
-                  />
-                  {{
-                    cat === 'bakery'
-                      ? 'Выпечка'
-                      : cat === 'pastry'
-                        ? 'Кондитерка'
-                        : 'Другое'
-                  }}
-                </h3>
-
-                <EntryCard
-                  v-for="item in items"
-                  :key="item.product_id"
-                  :item="item"
-                  :editable="canEditReport"
-                  @remove="
-                    () => {
-                      if (!canEditReport) return
-                      const idx = dailyEntries.indexOf(item)
-                      if (idx > -1) dailyEntries.splice(idx, 1)
-                    }
-                  "
-                />
-              </div>
-
-              <div v-if="dailyEntries.length === 0" class="text-center py-10 opacity-20">
-                <ShoppingBasket class="w-10 h-10 mx-auto mb-2" />
-                <p class="text-[10px] font-black uppercase">Нет товаров в отчете</p>
-              </div>
-            </div>
-          </div>
+          <ReportView
+            v-else
+            :products="products"
+            :daily-entries="dailyEntries"
+            :editable="canEditReport"
+            @add-product="onAddProduct"
+            @remove-entry="removeReportEntry"
+          />
         </div>
       </main>
 
-      <nav
+      <AppBottomNav
         v-if="userRole"
-        class="fixed bottom-0 left-0 right-0 z-[100] px-4 pb-safe nav-safe"
-      >
-        <div class="max-w-md mx-auto mb-3">
-          <div
-            class="kof-tabbar"
-            :style="{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }"
-          >
-            <button
-              v-for="item in navItems"
-              :key="item.tab"
-              class="kof-tabbtn"
-              @click="navigateTo(item.tab)"
-              :aria-label="item.label"
-              type="button"
-            >
-              <span
-                class="kof-tabbtn__icon"
-                :class="{ 'is-active': activeTab === item.tab }"
-              >
-                <NavIcon :name="item.icon" class="w-6 h-6" />
-              </span>
-            </button>
-          </div>
-        </div>
-      </nav>
+        :active-tab="activeTab"
+        :items="navItems"
+        @navigate="navigateTo"
+      />
 
       <div
         v-if="activeTab === 'main' && canEditReport && reportSaveLabel"
@@ -1305,44 +936,115 @@ textarea {
   animation: swing 2s infinite;
 }
 
-.kof-tabbar {
-  background: rgba(2, 6, 23, 0.95);
-  border-radius: 16px;
-  height: 56px;
-  padding: 0 8px;
-  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.24);
-  display: grid;
-  position: relative;
-  overflow: visible;
+.page-fade {
+  animation: page-fade-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.kof-tabbtn {
-  border: 0;
-  background: transparent;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
+.page-stack > * {
+  animation: page-item-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.kof-tabbtn__icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 9999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #94a3b8;
-  transition: transform 190ms ease, color 180ms ease;
-  position: relative;
-  z-index: 1;
+.page-stack > *:nth-child(1) {
+  animation-delay: 20ms;
 }
 
-.kof-tabbtn__icon.is-active {
-  transform: translateY(-8px);
-  background-color: #2563eb;
-  color: #fff;
+.page-stack > *:nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.page-stack > *:nth-child(3) {
+  animation-delay: 100ms;
+}
+
+.page-stack > *:nth-child(4) {
+  animation-delay: 140ms;
+}
+
+.page-stack > *:nth-child(5) {
+  animation-delay: 180ms;
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes page-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.messenger-search-enter-active,
+.messenger-search-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.messenger-search-enter-from,
+.messenger-search-leave-to {
+  opacity: 0;
+  transform: scaleX(0.16);
+}
+
+.messenger-search-enter-to,
+.messenger-search-leave-from {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.messenger-actions-enter-active,
+.messenger-actions-leave-active,
+.header-title-enter-active,
+.header-title-leave-active,
+.header-actions-enter-active,
+.header-actions-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.messenger-actions-enter-from,
+.messenger-actions-leave-to {
+  opacity: 0;
+  transform: translateX(8px);
+}
+
+.messenger-actions-enter-to,
+.messenger-actions-leave-from {
+  opacity: 1;
+  transform: translate(0);
+}
+
+.header-title-enter-from,
+.header-title-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.header-title-enter-to,
+.header-title-leave-from,
+.header-actions-enter-to,
+.header-actions-leave-from {
+  opacity: 1;
+  transform: translate(0);
+}
+
+.header-actions-enter-from,
+.header-actions-leave-to {
+  opacity: 0;
+  transform: translateX(8px);
 }
 </style>

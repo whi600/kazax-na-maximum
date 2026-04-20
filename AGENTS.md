@@ -22,6 +22,10 @@ This is a Vue 3 + Vite frontend with a small native Node.js HTTP API and a local
 
 Use ES modules throughout (`"type": "module"`). Follow the existing style: two-space indentation, single quotes in JavaScript, semicolon-free statements, and Vue single-file components using `<script setup>`. Name Vue components in PascalCase (`ProductSelector.vue`) and JavaScript variables/functions in camelCase. Keep API route names explicit and grouped by feature in `server/index.js`.
 
+## Maintainability & Decomposition
+
+Write code for future changes, not only for the current task. Keep components and helpers focused on one clear responsibility. If a Vue file starts mixing unrelated concerns, extract a child component or helper when it reduces real complexity. Decompose in moderation: split code enough to make ownership and behavior clear, but avoid tiny abstractions that hide simple logic. Prefer explicit props/events between components over reaching into child internals.
+
 ## Testing Guidelines
 
 No automated test framework is configured yet. Before submitting changes, run `npm run build` and manually verify the affected flow through the Vite app and API. If tests are added, prefer colocated component tests under `src/components/__tests__/` and backend route tests under `server/__tests__/`, using filenames like `AuthView.test.js`.

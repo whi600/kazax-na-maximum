@@ -161,6 +161,56 @@ const migrations = [
         ('employee', 1, 0, 0, 0, 0);
     `,
   },
+  {
+    name: '007_messenger',
+    sql: `
+      CREATE TABLE IF NOT EXISTS conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL DEFAULT 'direct',
+        title TEXT,
+        direct_key TEXT UNIQUE,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS conversation_members (
+        conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_read_at TEXT,
+        PRIMARY KEY(conversation_id, user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        body TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS message_attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL UNIQUE,
+        mime_type TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        storage_path TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_conversations_updated_at
+        ON conversations(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_conversation_members_user
+        ON conversation_members(user_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation_created
+        ON messages(conversation_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_message_attachments_message
+        ON message_attachments(message_id);
+    `,
+  },
 ]
 
 const appliedMigrationRows = db.prepare('SELECT name FROM migrations').all()

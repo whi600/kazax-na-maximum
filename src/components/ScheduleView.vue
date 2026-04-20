@@ -1,6 +1,22 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editingApi, shiftsApi } from '../api'
+import {
+  addDays,
+  createDefaultWeekTemplate,
+  formatDateHeader,
+  formatDateInput,
+  formatWeekDay,
+  formatWeekRange,
+  getCurrentWeekStart,
+  getNextWeekStart,
+  getWeekDates,
+  getWeekStart,
+  isPastDate,
+  parseDate,
+  pickMissingTemplateShifts,
+  toDateKey,
+} from '../scheduleUtils'
 import DatePickerSheet from './DatePickerSheet.vue'
 import {
   Calendar,
@@ -177,28 +193,6 @@ const openPicker = (inputRef) => {
   if (typeof input.click === 'function') input.click()
 }
 
-const parseDate = (dateStr) => {
-  const [year, month, day] = String(dateStr).split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-const toDateKey = (date) => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const addDays = (date, amount) => {
-  const next = new Date(date)
-  next.setDate(next.getDate() + amount)
-  return next
-}
-
-const getNextWeekStart = (weekStart) => toDateKey(addDays(parseDate(weekStart), 7))
-const getWeekDates = (weekStart) =>
-  Array.from({ length: 7 }, (_, index) => toDateKey(addDays(parseDate(weekStart), index)))
-
 const hasBootstrappedDefaultWeeks = () => {
   if (typeof window === 'undefined') return true
   return window.localStorage.getItem(DEFAULT_WEEKS_BOOTSTRAP_KEY) === '1'
@@ -208,14 +202,6 @@ const markDefaultWeeksBootstrapped = () => {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(DEFAULT_WEEKS_BOOTSTRAP_KEY, '1')
 }
-
-const getWeekStart = (dateStr) => {
-  const date = parseDate(dateStr)
-  const day = date.getDay() || 7
-  return toDateKey(addDays(date, 1 - day))
-}
-
-const getCurrentWeekStart = () => getWeekStart(toDateKey(new Date()))
 
 const resolveUserName = () => {
   if (props.displayName?.trim()) {
@@ -234,49 +220,6 @@ const resolveUserName = () => {
   }
 
   currentUserName.value = 'Сотрудник'
-}
-
-const formatDateHeader = (dateStr) => {
-  if (!dateStr) return ''
-
-  const date = parseDate(dateStr)
-  const day = date.getDate().toString().padStart(2, '0')
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const weekDay = date
-    .toLocaleDateString('ru-RU', { weekday: 'long' })
-    .toUpperCase()
-
-  return `${day}.${month} ${weekDay}`
-}
-
-const formatShortDate = (dateStr) => {
-  const date = parseDate(dateStr)
-  const day = date.getDate().toString().padStart(2, '0')
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  return `${day}.${month}`
-}
-
-const formatWeekRange = (weekStart) => {
-  const start = parseDate(weekStart)
-  const end = addDays(start, 6)
-  return `${formatShortDate(toDateKey(start))}–${formatShortDate(toDateKey(end))}`
-}
-
-const formatWeekDay = (dateStr) =>
-  parseDate(dateStr).toLocaleDateString('ru-RU', { weekday: 'short' }).toUpperCase()
-
-const formatDateInput = (dateStr) => {
-  if (!dateStr) return 'Выберите дату'
-  return parseDate(dateStr).toLocaleDateString('ru-RU', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-const isPastDate = (dateStr) => {
-  const today = toDateKey(new Date())
-  return dateStr < today
 }
 
 const isShiftPast = (shift) => {
@@ -306,61 +249,6 @@ const isCurrentUserShift = (shift) => {
 }
 
 const canSelfCancelBooking = (shift) => isCurrentUserShift(shift) && !isShiftPast(shift)
-
-const createDefaultWeekTemplate = (weekStart) => {
-  const start = parseDate(weekStart)
-  const result = []
-
-  for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
-    const date = toDateKey(addDays(start, dayIndex))
-    const slots =
-      dayIndex === 6
-        ? [
-            ['09:00', '15:00'],
-            ['09:00', '15:00'],
-            ['14:00', '21:00'],
-            ['14:00', '21:00'],
-          ]
-        : [
-            ['09:00', '15:00'],
-            ['14:00', '21:00'],
-          ]
-
-    slots.forEach(([start_time, end_time]) => {
-      result.push({ date, start_time, end_time })
-    })
-  }
-
-  return result
-}
-
-const buildShiftCountMap = (shiftList) => {
-  const counts = new Map()
-  shiftList.forEach((shift) => {
-    const key = `${shift.date}|${shift.start_time}|${shift.end_time}`
-    counts.set(key, (counts.get(key) || 0) + 1)
-  })
-  return counts
-}
-
-const pickMissingTemplateShifts = (weekStartsList, shiftList) => {
-  const available = buildShiftCountMap(shiftList)
-  const missing = []
-
-  weekStartsList.forEach((weekStart) => {
-    createDefaultWeekTemplate(weekStart).forEach((templateShift) => {
-      const key = `${templateShift.date}|${templateShift.start_time}|${templateShift.end_time}`
-      const count = available.get(key) || 0
-      if (count > 0) {
-        available.set(key, count - 1)
-      } else {
-        missing.push(templateShift)
-      }
-    })
-  })
-
-  return missing
-}
 
 const makeTempShift = ({ date, start_time, end_time }) => ({
   id: -(Date.now() + tempShiftSeq++),
@@ -811,138 +699,140 @@ onBeforeUnmount(() => {
       <p class="text-[10px] font-black uppercase tracking-widest">Загрузка...</p>
     </div>
 
-    <div v-else class="px-3 py-4">
-      <div
-        v-if="canManageSchedule && scheduleEditorsLabel"
-        class="rounded-lg border border-amber-100 bg-amber-50 text-amber-700 px-3 py-2 text-[10px] font-black uppercase mb-3"
-      >
-        {{ scheduleEditorsLabel }}
-      </div>
-
-      <div
-        v-if="canManageSchedule && scheduleLastChangedLabel"
-        class="rounded-lg border border-slate-100 bg-slate-50 text-slate-500 px-3 py-2 text-[10px] font-black uppercase mb-3"
-      >
-        {{ scheduleLastChangedLabel }}
-      </div>
-
-      <div v-if="approvedShifts.length > 0" class="mb-4">
-        <div class="flex gap-2 overflow-x-auto pb-1 mb-3">
-          <button
-            v-for="weekStart in weekStarts"
-            :key="weekStart"
-            @click="onWeekTabClick(weekStart)"
-            class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all"
-            :class="
-              weekStart === selectedWeekStart
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-white text-slate-400 border-slate-100'
-            "
-            type="button"
-          >
-            <span class="block text-[10px] font-black uppercase">Неделя</span>
-            <span class="block text-xs font-black">{{ formatWeekRange(weekStart) }}</span>
-          </button>
-          <button
-            v-if="canManageSchedule"
-            @click="addNextWeekTemplate"
-            class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all bg-white text-slate-400 border-slate-100 flex items-center justify-center min-w-[108px]"
-            type="button"
-            aria-label="Добавить неделю"
-          >
-            <Plus class="w-5 h-5" />
-          </button>
-        </div>
-
-        <div class="grid grid-cols-3 gap-2 mb-5">
-          <div class="bg-white rounded-lg border border-slate-100 p-3">
-            <p class="text-[9px] font-black text-slate-400 uppercase">Всего</p>
-            <p class="text-xl font-black text-slate-800">{{ selectedWeekStats.shiftsCount }}</p>
-          </div>
-          <div class="bg-white rounded-lg border border-slate-100 p-3">
-            <p class="text-[9px] font-black text-slate-400 uppercase">Свободно</p>
-            <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.openCount }}</p>
-          </div>
-          <div class="bg-white rounded-lg border border-slate-100 p-3">
-            <p class="text-[9px] font-black text-slate-400 uppercase">Мои</p>
-            <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.myCount }}</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="space-y-8">
+    <Transition name="schedule-shell" appear mode="out-in">
+      <div v-if="!loading" class="px-3 py-4">
         <div
-          v-for="day in selectedWeekDays"
-          :key="day.date"
-          class="animate-in fade-in slide-in-from-bottom-2 duration-500"
+          v-if="canManageSchedule && scheduleEditorsLabel"
+          class="schedule-fade rounded-lg border border-amber-100 bg-amber-50 text-amber-700 px-3 py-2 text-[10px] font-black uppercase mb-3"
         >
-          <div class="flex items-center justify-between mb-3 ml-1">
-            <div>
-              <h3 class="text-[11px] font-black text-blue-600 uppercase tracking-widest">{{ formatDateHeader(day.date) }}</h3>
+          {{ scheduleEditorsLabel }}
+        </div>
+
+        <div
+          v-if="canManageSchedule && scheduleLastChangedLabel"
+          class="schedule-fade rounded-lg border border-slate-100 bg-slate-50 text-slate-500 px-3 py-2 text-[10px] font-black uppercase mb-3"
+        >
+          {{ scheduleLastChangedLabel }}
+        </div>
+
+        <div class="mb-4 schedule-fade">
+          <div class="flex gap-2 overflow-x-auto pb-1 mb-3">
+            <button
+              v-for="weekStart in weekStarts"
+              :key="weekStart"
+              @click="onWeekTabClick(weekStart)"
+              class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all"
+              :class="
+                weekStart === selectedWeekStart
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-400 border-slate-100'
+              "
+              type="button"
+            >
+              <span class="block text-[10px] font-black uppercase">Неделя</span>
+              <span class="block text-xs font-black">{{ formatWeekRange(weekStart) }}</span>
+            </button>
+            <button
+              v-if="canManageSchedule"
+              @click="addNextWeekTemplate"
+              class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all bg-white text-slate-400 border-slate-100 flex items-center justify-center min-w-[108px]"
+              type="button"
+              aria-label="Добавить неделю"
+            >
+              <Plus class="w-5 h-5" />
+            </button>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 mb-5">
+            <div class="schedule-stat bg-white rounded-lg border border-slate-100 p-3">
+              <p class="text-[9px] font-black text-slate-400 uppercase">Всего</p>
+              <p class="text-xl font-black text-slate-800">{{ selectedWeekStats.shiftsCount }}</p>
+            </div>
+            <div class="schedule-stat bg-white rounded-lg border border-slate-100 p-3">
+              <p class="text-[9px] font-black text-slate-400 uppercase">Свободно</p>
+              <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.openCount }}</p>
+            </div>
+            <div class="schedule-stat bg-white rounded-lg border border-slate-100 p-3">
+              <p class="text-[9px] font-black text-slate-400 uppercase">Мои</p>
+              <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.myCount }}</p>
             </div>
           </div>
+        </div>
 
-          <div v-if="day.shifts.length === 0" class="bg-white/70 border border-dashed border-slate-100 rounded-lg p-4 text-center">
-            <p class="text-[10px] font-black uppercase text-slate-300">{{ formatWeekDay(day.date) }} свободен</p>
-          </div>
-
-          <div class="space-y-2">
-            <div
-              v-for="shift in day.shifts"
-              :key="shift.id"
-              class="bg-white p-3.5 rounded-lg border border-slate-100 shadow-sm flex items-center justify-between transition-all"
-              :class="{ 'opacity-50': isPastDate(shift.date) }"
-            >
-              <div class="flex items-center gap-2">
-                <span class="text-[12px] font-black bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-slate-800">
-                  {{ shift.start_time }}–{{ shift.end_time }}
-                </span>
-                <span v-if="shift.id < 0" class="text-[8px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase">
-                  New
-                </span>
+        <TransitionGroup name="day-card" appear tag="div" class="space-y-8">
+          <div v-for="(day, dayIndex) in selectedWeekDays" :key="day.date" class="day-card">
+            <div class="flex items-center justify-between mb-3 ml-1">
+              <div>
+                <h3 class="text-[11px] font-black text-blue-600 uppercase tracking-widest">{{ formatDateHeader(day.date) }}</h3>
               </div>
+            </div>
 
-              <div class="flex items-center gap-3">
-                <div
-                  v-if="shift.employee_name"
-                  class="flex items-center gap-2 bg-blue-50/50 px-3 py-1.5 rounded-lg border border-blue-100/50"
-                >
-                  <span class="text-[11px] font-black text-blue-600">{{ shift.employee_name }}</span>
-                  <button
-                    v-if="canManageSchedule || canSelfCancelBooking(shift)"
-                    @click="cancelBooking(shift)"
-                    class="text-red-500 p-0.5 hover:bg-white rounded-md transition-colors"
-                  >
-                    <X class="w-3.5 h-3.5" />
-                  </button>
+            <div v-if="day.shifts.length === 0" class="bg-white/70 border border-dashed border-slate-100 rounded-lg p-4 text-center">
+              <p class="text-[10px] font-black uppercase text-slate-300">{{ formatWeekDay(day.date) }} свободен</p>
+            </div>
+
+            <TransitionGroup name="shift-card" appear tag="div" class="space-y-2">
+              <div
+                v-for="(shift, shiftIndex) in day.shifts"
+                :key="shift.id"
+                class="bg-white p-3.5 rounded-lg border border-slate-100 shadow-sm flex items-center justify-between transition-all"
+                :class="{ 'opacity-50': isPastDate(shift.date) }"
+                :style="{
+                  '--day-delay': `${dayIndex * 80}ms`,
+                  '--shift-delay': `${shiftIndex * 70}ms`,
+                }"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-[12px] font-black bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-slate-800">
+                    {{ shift.start_time }}–{{ shift.end_time }}
+                  </span>
+                  <span v-if="shift.id < 0" class="text-[8px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase">
+                    New
+                  </span>
                 </div>
 
-                <button
-                  v-else-if="!isPastDate(shift.date)"
-                  @click="bookShift(shift)"
-                  class="bg-slate-800 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md active:scale-95 transition-all"
-                >
-                  Запись
-                </button>
+                <div class="flex items-center gap-3">
+                  <div
+                    v-if="shift.employee_name"
+                    class="flex items-center gap-2 bg-blue-50/50 px-3 py-1.5 rounded-lg border border-blue-100/50"
+                  >
+                    <span class="text-[11px] font-black text-blue-600">{{ shift.employee_name }}</span>
+                    <button
+                      v-if="canManageSchedule || canSelfCancelBooking(shift)"
+                      @click="cancelBooking(shift)"
+                      class="text-red-500 p-0.5 hover:bg-white rounded-md transition-colors"
+                    >
+                      <X class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
-                <button
-                  v-if="canManageSchedule"
-                  @click="markForDeletion(shift)"
-                  class="text-slate-200 hover:text-red-500 transition-colors"
-                >
-                  <Trash2 class="w-4 h-4" />
-                </button>
+                  <button
+                    v-else-if="!isPastDate(shift.date)"
+                    @click="bookShift(shift)"
+                    class="bg-slate-800 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md active:scale-95 transition-all"
+                  >
+                    Запись
+                  </button>
+
+                  <button
+                    v-if="canManageSchedule"
+                    @click="markForDeletion(shift)"
+                    class="text-slate-200 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
+            </TransitionGroup>
           </div>
+        </TransitionGroup>
+
+        <div v-if="approvedShifts.length === 0" class="text-center py-20 opacity-20 schedule-fade">
+          <Calendar class="w-12 h-12 mx-auto mb-2" />
+          <p class="text-xs font-black uppercase">График не заполнен</p>
         </div>
       </div>
-
-      <div v-if="approvedShifts.length === 0" class="text-center py-20 opacity-20">
-        <Calendar class="w-12 h-12 mx-auto mb-2" />
-        <p class="text-xs font-black uppercase">График не заполнен</p>
-      </div>
-    </div>
+    </Transition>
 
     <div
       v-if="canManageSchedule && structureSaveLabel"
@@ -1120,6 +1010,95 @@ onBeforeUnmount(() => {
 
 .animate-swing {
   animation: swing 2s infinite;
+}
+
+.schedule-shell-enter-active,
+.schedule-shell-leave-active {
+  transition:
+    opacity 220ms ease,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.schedule-shell-enter-from,
+.schedule-shell-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.schedule-shell-enter-to,
+.schedule-shell-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.schedule-fade {
+  animation: schedule-fade-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.schedule-stat {
+  animation: schedule-stat-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.day-card-enter-active,
+.day-card-leave-active,
+.shift-card-enter-active,
+.shift-card-leave-active {
+  transition:
+    opacity 220ms ease,
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.day-card-enter-from,
+.day-card-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.day-card-enter-to,
+.day-card-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.shift-card-enter-from,
+.shift-card-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.985);
+}
+
+.shift-card-enter-to,
+.shift-card-leave-from {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.day-card > .space-y-2 > *:nth-child(1),
+.day-card > .space-y-2 > *:nth-child(2),
+.day-card > .space-y-2 > *:nth-child(3),
+.day-card > .space-y-2 > *:nth-child(4) {
+  animation-delay: calc(var(--shift-delay, 0ms) + var(--day-delay, 0ms));
+}
+
+@keyframes schedule-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes schedule-stat-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 ::-webkit-scrollbar {
