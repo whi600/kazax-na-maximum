@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+    container_name: kofeteriy-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8787
+      DB_PATH: /app/data/kofeteriy.sqlite
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+    ports:
+      - "${APP_PORT:-8787}:8787"
+    volumes:
+      - ${DATA_DIR:-/opt/kofeteriy/data}:/app/data
+
