@@ -360,11 +360,23 @@ const listMessagesStatement = db.prepare(`
     m.conversation_id,
     m.sender_user_id,
     m.body,
+    m.reply_to_message_id,
     m.created_at,
     u.name AS sender_name,
-    u.email AS sender_email
+    u.email AS sender_email,
+    rm.body AS reply_body,
+    rm.sender_user_id AS reply_sender_user_id,
+    ru.name AS reply_sender_name,
+    ru.email AS reply_sender_email,
+    (
+      SELECT COUNT(*)
+      FROM message_attachments rma
+      WHERE rma.message_id = rm.id
+    ) AS reply_attachment_count
   FROM messages m
   LEFT JOIN users u ON u.id = m.sender_user_id
+  LEFT JOIN messages rm ON rm.id = m.reply_to_message_id
+  LEFT JOIN users ru ON ru.id = rm.sender_user_id
   WHERE m.conversation_id = ?
     AND m.id IN (
       SELECT id
@@ -381,11 +393,23 @@ const getMessageByIdStatement = db.prepare(`
     m.conversation_id,
     m.sender_user_id,
     m.body,
+    m.reply_to_message_id,
     m.created_at,
     u.name AS sender_name,
-    u.email AS sender_email
+    u.email AS sender_email,
+    rm.body AS reply_body,
+    rm.sender_user_id AS reply_sender_user_id,
+    ru.name AS reply_sender_name,
+    ru.email AS reply_sender_email,
+    (
+      SELECT COUNT(*)
+      FROM message_attachments rma
+      WHERE rma.message_id = rm.id
+    ) AS reply_attachment_count
   FROM messages m
   LEFT JOIN users u ON u.id = m.sender_user_id
+  LEFT JOIN messages rm ON rm.id = m.reply_to_message_id
+  LEFT JOIN users ru ON ru.id = rm.sender_user_id
   WHERE m.id = ?
 `)
 const listAttachmentsForConversationStatement = db.prepare(`
@@ -414,8 +438,8 @@ const listAttachmentsForMessageStatement = db.prepare(`
   WHERE message_id = ?
 `)
 const insertMessageStatement = db.prepare(`
-  INSERT INTO messages(conversation_id, sender_user_id, body)
-  VALUES (?, ?, ?)
+  INSERT INTO messages(conversation_id, sender_user_id, body, reply_to_message_id)
+  VALUES (?, ?, ?, ?)
 `)
 const insertAttachmentStatement = db.prepare(`
   INSERT INTO message_attachments(
@@ -1028,6 +1052,18 @@ const messageToDto = (row, attachments = []) => ({
   sender_name: row.sender_name || row.sender_email || 'Пользователь',
   sender_email: row.sender_email,
   body: row.body || '',
+  reply_to_message_id: row.reply_to_message_id || null,
+  reply_to: row.reply_to_message_id
+    ? {
+        id: row.reply_to_message_id,
+        sender_user_id: row.reply_sender_user_id,
+        sender_name:
+          row.reply_sender_name || row.reply_sender_email || 'Пользователь',
+        sender_email: row.reply_sender_email,
+        body: row.reply_body || '',
+        has_attachment: Number(row.reply_attachment_count || 0) > 0,
+      }
+    : null,
   created_at: row.created_at,
   attachments: attachments.map(attachmentToDto),
 })
@@ -1929,6 +1965,7 @@ const appServer = http.createServer((req, res) => {
       const contentType = String(req.headers['content-type'] || '').toLowerCase()
       let bodyText = ''
       let attachment = null
+      let replyToMessageId = null
 
       if (contentType.includes('multipart/form-data')) {
         let parsed
@@ -1940,6 +1977,13 @@ const appServer = http.createServer((req, res) => {
         }
 
         bodyText = parsed.fields.body || ''
+        replyToMessageId =
+          Number.parseInt(
+            parsed.fields.replyToMessageId ||
+              parsed.fields.reply_to_message_id ||
+              '',
+            10,
+          ) || null
         const rawFile =
           parsed.files.find((file) => file.fieldName === 'attachment') ||
           parsed.files[0]
@@ -1953,12 +1997,23 @@ const appServer = http.createServer((req, res) => {
       } else {
         const body = await readJsonBody(req)
         bodyText = body.body || ''
+        replyToMessageId =
+          Number.parseInt(body.replyToMessageId || body.reply_to_message_id || '', 10) ||
+          null
       }
 
       const messageBody = String(bodyText || '').trim()
       if (!messageBody && !attachment) {
         badRequest(res, 'Напишите сообщение или прикрепите файл')
         return
+      }
+
+      if (replyToMessageId) {
+        const repliedMessage = getMessageByIdStatement.get(replyToMessageId)
+        if (!repliedMessage || repliedMessage.conversation_id !== messengerConversationId) {
+          badRequest(res, 'Сообщение для ответа не найдено в этом чате')
+          return
+        }
       }
 
       let savedFilePath = null
@@ -1969,6 +2024,7 @@ const appServer = http.createServer((req, res) => {
           messengerConversationId,
           user.id,
           messageBody || null,
+          replyToMessageId,
         )
         messageId = Number(result.lastInsertRowid)
 

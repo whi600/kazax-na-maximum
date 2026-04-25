@@ -139,10 +139,11 @@ export const messengerApi = {
       `/api/messenger/conversations/${conversationId}/messages?limit=${limit}`,
       { method: 'GET' },
     ),
-  sendMessage: (conversationId, { body = '', file = null } = {}) => {
+  sendMessage: (conversationId, { body = '', file = null, replyToMessageId = null } = {}) => {
     if (file) {
       const formData = new FormData()
       formData.append('body', body)
+      if (replyToMessageId) formData.append('replyToMessageId', replyToMessageId)
       formData.append('attachment', file)
       return apiRequest(`/api/messenger/conversations/${conversationId}/messages`, {
         method: 'POST',
@@ -152,7 +153,7 @@ export const messengerApi = {
 
     return apiRequest(`/api/messenger/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body, replyToMessageId }),
     })
   },
 }

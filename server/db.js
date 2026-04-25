@@ -211,6 +211,16 @@ const migrations = [
         ON message_attachments(message_id);
     `,
   },
+  {
+    name: '008_message_replies',
+    sql: `
+      ALTER TABLE messages
+        ADD COLUMN reply_to_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_messages_reply_to
+        ON messages(reply_to_message_id);
+    `,
+  },
 ]
 
 const appliedMigrationRows = db.prepare('SELECT name FROM migrations').all()
