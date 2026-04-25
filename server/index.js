@@ -2208,14 +2208,19 @@ const appServer = http.createServer((req, res) => {
 
     const ext = path.extname(outputPath)
     const contentType = mimeTypes[ext] || 'application/octet-stream'
+    const cacheControl =
+      outputPath.endsWith('index.html') ||
+      outputPath.endsWith('sw.js') ||
+      outputPath.endsWith('app-version.json') ||
+      outputPath.endsWith('manifest.webmanifest')
+        ? 'no-cache'
+        : 'public, max-age=31536000, immutable'
 
     const data = fs.readFileSync(outputPath)
     res.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': data.length,
-      'Cache-Control': outputPath.endsWith('index.html')
-        ? 'no-cache'
-        : 'public, max-age=31536000, immutable',
+      'Cache-Control': cacheControl,
     })
     res.end(data)
   })
