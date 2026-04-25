@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:api": "node server/index.js",
     "dev:all": "node server/index.js & vite",
-    "build": "vite build",
+    "build": "node scripts/write-build-version.js && vite build",
     "preview": "vite preview",
     "start": "node server/index.js",
     "reset-password": "node scripts/reset-password.js"
