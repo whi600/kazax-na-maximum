@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   FileText,
@@ -43,6 +43,7 @@ const chatOpen = ref(false)
 const draft = ref('')
 const selectedFile = ref(null)
 const fileInput = ref(null)
+const messageInput = ref(null)
 const messageList = ref(null)
 const peoplePanelOpen = ref(false)
 const groupSheetOpen = ref(false)
@@ -57,6 +58,7 @@ const sending = ref(false)
 const errorMessage = ref('')
 const startingUserId = ref(null)
 const touchStart = ref({ x: 0, y: 0 })
+const chatViewportHeight = ref('100dvh')
 let refreshTimer = null
 
 const activeConversation = computed(() =>
@@ -121,6 +123,16 @@ const scrollToBottom = async () => {
   messageList.value.scrollTop = messageList.value.scrollHeight
 }
 
+const focusMessageInput = async () => {
+  await nextTick()
+  messageInput.value?.focus?.({ preventScroll: true })
+}
+
+const updateChatViewportHeight = () => {
+  const height = window.visualViewport?.height || window.innerHeight
+  chatViewportHeight.value = `${Math.round(height)}px`
+}
+
 const clearFile = () => {
   selectedFile.value = null
   if (fileInput.value) fileInput.value.value = ''
@@ -155,6 +167,7 @@ const openConversation = async (conversation) => {
   emit('chat-open-change', true)
   messages.value = []
   await loadMessages(conversation.id)
+  await focusMessageInput()
 }
 
 const closeConversation = () => {
@@ -303,6 +316,7 @@ const sendMessage = async () => {
     draft.value = ''
     clearFile()
     await scrollToBottom()
+    await focusMessageInput()
   } catch (error) {
     errorMessage.value = error?.message || 'Не удалось отправить сообщение'
   } finally {
@@ -328,6 +342,11 @@ const onChatTouchEnd = (event) => {
 }
 
 onMounted(async () => {
+  updateChatViewportHeight()
+  window.visualViewport?.addEventListener('resize', updateChatViewportHeight)
+  window.visualViewport?.addEventListener('scroll', updateChatViewportHeight)
+  window.addEventListener('resize', updateChatViewportHeight)
+
   loading.value = true
   try {
     await Promise.all([loadUsers(), loadConversations()])
@@ -347,7 +366,19 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  window.visualViewport?.removeEventListener('resize', updateChatViewportHeight)
+  window.visualViewport?.removeEventListener('scroll', updateChatViewportHeight)
+  window.removeEventListener('resize', updateChatViewportHeight)
+  document.documentElement.classList.remove('messenger-chat-lock')
   emit('chat-open-change', false)
+})
+
+watch(chatOpen, (open) => {
+  document.documentElement.classList.toggle('messenger-chat-lock', open)
+  if (open) {
+    updateChatViewportHeight()
+    focusMessageInput()
+  }
 })
 
 defineExpose({
@@ -390,6 +421,8 @@ defineExpose({
       <section
         v-if="chatOpen && activeConversation"
         class="messenger-chat-shell fixed inset-0 z-[180] flex min-h-0 flex-col bg-slate-50 text-slate-800"
+        :style="{ height: chatViewportHeight }"
+        @click.stop
         @touchstart.passive="onChatTouchStart"
         @touchend.passive="onChatTouchEnd"
       >
@@ -561,18 +594,21 @@ defineExpose({
             >
               <Paperclip class="h-5 w-5" />
             </button>
-            <input
+            <textarea
+              ref="messageInput"
               v-model="draft"
-              type="text"
               :disabled="sending"
+              rows="1"
+              enterkeyhint="enter"
               placeholder="Сообщение"
-              class="h-11 min-w-0 flex-1 rounded-lg border border-slate-100 bg-slate-50 px-3 text-[12px] font-bold text-slate-800 placeholder:text-slate-300 disabled:opacity-50"
-            />
+              class="messenger-message-input min-w-0 flex-1 resize-none rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-[12px] font-bold leading-5 text-slate-800 placeholder:text-slate-300 disabled:opacity-50"
+            ></textarea>
             <button
               type="submit"
               :disabled="sending || !hasDraft"
               class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-100 disabled:opacity-40 active:scale-95 transition-all"
               aria-label="Отправить"
+              @pointerdown.prevent
             >
               <RotateCw v-if="sending" class="h-5 w-5 animate-spin" />
               <Send v-else class="h-5 w-5" />
@@ -712,15 +748,30 @@ defineExpose({
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .messenger-chat-messages {
   min-height: 0;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .messenger-composer {
   padding-bottom: calc(0.5rem + var(--app-safe-bottom, env(safe-area-inset-bottom)));
+}
+
+.messenger-message-input {
+  min-height: 2.75rem;
+  max-height: 7.5rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+:global(html.messenger-chat-lock),
+:global(html.messenger-chat-lock body) {
+  height: 100%;
+  overflow: hidden;
 }
 
 .chat-slide-enter-active,

@@ -831,7 +831,7 @@ onBeforeUnmount(() => {
       </main>
 
       <AppBottomNav
-        v-if="userRole"
+        v-if="userRole && !(activeTab === 'messenger' && messengerChatOpen)"
         :active-tab="activeTab"
         :items="navItems"
         @navigate="navigateTo"
