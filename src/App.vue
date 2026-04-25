@@ -19,11 +19,21 @@ import {
 
 const SUPER_ADMIN_EMAIL = 'misakurnikov942@gmail.com'
 
+if (typeof window !== 'undefined') {
+  const standalone =
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    window.matchMedia?.('(display-mode: fullscreen)').matches ||
+    window.navigator?.standalone === true
+
+  document.documentElement.classList.toggle('is-standalone-pwa', Boolean(standalone))
+}
+
 const activeTab = ref(getTabFromLocation())
 const scheduleViewRef = ref(null)
 const messengerViewRef = ref(null)
 const messengerSearchOpen = ref(false)
 const messengerSearchQuery = ref('')
+const messengerChatOpen = ref(false)
 const schedulePendingCount = ref(0)
 const products = ref([])
 const dailyEntries = ref([])
@@ -102,6 +112,7 @@ const updateRoute = (tab, replace = false) => {
 const navigateTo = (tab, replace = false) => {
   const nextTab = tab === 'archive' && !canAccessArchive.value ? 'main' : tab
   activeTab.value = nextTab
+  if (nextTab !== 'messenger') messengerChatOpen.value = false
   if (nextTab !== 'profile') profileView.value = 'main'
   updateRoute(nextTab, replace)
 }
@@ -241,7 +252,10 @@ const loadRoleUsers = async () => {
   roleUsersLoading.value = true
   try {
     const response = await authApi.users()
-    roleUsers.value = response.users || []
+    roleUsers.value = (response.users || []).map((user) => ({
+      ...user,
+      pendingRole: user.role,
+    }))
   } catch (error) {
     alert(error?.message || 'Не удалось загрузить список пользователей')
   } finally {
@@ -251,7 +265,7 @@ const loadRoleUsers = async () => {
 
 const updateRoleUserDraft = (targetUser, role) => {
   roleUsers.value = roleUsers.value.map((item) =>
-    item.id === targetUser.id ? { ...item, role } : item,
+    item.id === targetUser.id ? { ...item, pendingRole: role } : item,
   )
 }
 
@@ -262,12 +276,15 @@ const changeUserRole = async (targetUser) => {
     return
   }
 
+  const nextRole = targetUser.pendingRole || targetUser.role
+  if (nextRole === targetUser.role) return
+
   roleUserUpdatingId.value = targetUser.id
   try {
-    const response = await authApi.updateUserRole(targetUser.id, targetUser.role)
+    const response = await authApi.updateUserRole(targetUser.id, nextRole)
     const updated = response.user
     roleUsers.value = roleUsers.value.map((item) =>
-      item.id === updated.id ? updated : item,
+      item.id === updated.id ? { ...updated, pendingRole: updated.role } : item,
     )
     alert('Роль пользователя обновлена')
   } catch (error) {
@@ -702,7 +719,7 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <AppHeader
-        v-if="activeTab !== 'profile'"
+        v-if="activeTab !== 'profile' && !(activeTab === 'messenger' && messengerChatOpen)"
         v-model:messenger-search-query="messengerSearchQuery"
         :active-tab="activeTab"
         :page-title="pageTitle"
@@ -789,6 +806,7 @@ onBeforeUnmount(() => {
             :currentUser="currentUser"
             :people-search-query="messengerSearchQuery"
             @person-selected="closeMessengerSearch"
+            @chat-open-change="messengerChatOpen = $event"
           />
         </div>
 
@@ -822,7 +840,7 @@ onBeforeUnmount(() => {
       <div
         v-if="activeTab === 'main' && canEditReport && reportSaveLabel"
         class="fixed left-1/2 -translate-x-1/2 z-[120] pointer-events-none"
-        :style="{ bottom: 'calc(86px + env(safe-area-inset-bottom))' }"
+        :style="{ bottom: 'calc(86px + var(--app-safe-bottom))' }"
       >
         <div
           class="rounded-full border px-4 py-2 text-[11px] font-black uppercase shadow-sm backdrop-blur-sm"
@@ -836,6 +854,23 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
+html {
+  --app-safe-bottom: env(safe-area-inset-bottom);
+  --app-nav-bottom: calc(0.35rem + var(--app-safe-bottom));
+}
+
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  html {
+    --app-safe-bottom: 0px;
+    --app-nav-bottom: 0.35rem;
+  }
+}
+
+html.is-standalone-pwa {
+  --app-safe-bottom: 0px;
+  --app-nav-bottom: 0.35rem;
+}
+
 ::-webkit-scrollbar {
   display: none;
 }
@@ -889,7 +924,7 @@ textarea {
 }
 
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--app-safe-bottom);
 }
 
 .pt-safe {
@@ -897,11 +932,11 @@ textarea {
 }
 
 .nav-safe {
-  min-height: calc(4rem + env(safe-area-inset-bottom));
+  min-height: calc(4rem + var(--app-safe-bottom));
 }
 
 .sheet-safe {
-  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(1rem + var(--app-safe-bottom));
 }
 
 .sheet-max {
@@ -910,7 +945,7 @@ textarea {
 }
 
 .pb-24 {
-  padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(6rem + var(--app-safe-bottom));
 }
 
 @keyframes swing {

@@ -136,7 +136,7 @@ const canEditUserRole = (targetUser) => {
 
           <div class="mt-2 flex items-center gap-2">
             <select
-              :value="user.role"
+              :value="user.pendingRole || user.role"
               :disabled="!canEditUserRole(user) || roleUserUpdatingId === user.id"
               class="flex-1 bg-slate-50 border border-slate-100 rounded-lg px-2 py-2 text-[10px] font-black text-slate-700 uppercase disabled:opacity-60"
               @change="emit('update-user-role', user, $event.target.value)"
@@ -148,7 +148,11 @@ const canEditUserRole = (targetUser) => {
             <button
               type="button"
               @click="emit('change-user-role', user)"
-              :disabled="!canEditUserRole(user) || roleUserUpdatingId === user.id"
+              :disabled="
+                !canEditUserRole(user) ||
+                roleUserUpdatingId === user.id ||
+                (user.pendingRole || user.role) === user.role
+              "
               class="bg-slate-900 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {{ roleUserUpdatingId === user.id ? '...' : 'Сменить' }}

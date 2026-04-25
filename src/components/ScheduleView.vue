@@ -105,32 +105,11 @@ const structureSaveClass = computed(() => {
   return 'bg-slate-50 text-slate-400 border-slate-100'
 })
 
-const formatRelativeTime = (value) => {
-  if (!value) return ''
-  const timestamp = new Date(value).getTime()
-  if (!Number.isFinite(timestamp)) return ''
-
-  const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
-  if (diffSec < 60) return `${diffSec} сек назад`
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin} мин назад`
-  const diffHours = Math.floor(diffMin / 60)
-  return `${diffHours} ч назад`
-}
-
 const scheduleEditorsLabel = computed(() => {
   const names = scheduleCollabStatus.value.activeEditors.map((item) => item.user_name)
   if (names.length === 0) return ''
   if (names.length === 1) return `Сейчас редактирует: ${names[0]}`
   return `Сейчас редактируют: ${names.join(', ')}`
-})
-
-const scheduleLastChangedLabel = computed(() => {
-  if (!scheduleCollabStatus.value.lastChangedAt) return ''
-  const who = scheduleCollabStatus.value.lastChangedBy
-    ? ` ${scheduleCollabStatus.value.lastChangedBy}`
-    : ''
-  return `Последнее изменение${who}: ${formatRelativeTime(scheduleCollabStatus.value.lastChangedAt)}`
 })
 
 const stopSchedulePresence = async () => {
@@ -708,13 +687,6 @@ onBeforeUnmount(() => {
           {{ scheduleEditorsLabel }}
         </div>
 
-        <div
-          v-if="canManageSchedule && scheduleLastChangedLabel"
-          class="schedule-fade rounded-lg border border-slate-100 bg-slate-50 text-slate-500 px-3 py-2 text-[10px] font-black uppercase mb-3"
-        >
-          {{ scheduleLastChangedLabel }}
-        </div>
-
         <div class="mb-4 schedule-fade">
           <div class="flex gap-2 overflow-x-auto pb-1 mb-3">
             <button
@@ -837,7 +809,7 @@ onBeforeUnmount(() => {
     <div
       v-if="canManageSchedule && structureSaveLabel"
       class="fixed left-1/2 -translate-x-1/2 z-[120] pointer-events-none"
-      :style="{ bottom: 'calc(86px + env(safe-area-inset-bottom))' }"
+      :style="{ bottom: 'calc(86px + var(--app-safe-bottom, env(safe-area-inset-bottom)))' }"
     >
       <div
         class="rounded-full border px-4 py-2 text-[11px] font-black uppercase shadow-sm backdrop-blur-sm"

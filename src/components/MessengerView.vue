@@ -4,8 +4,10 @@ import {
   ArrowLeft,
   FileText,
   Image as ImageIcon,
+  MessageCircle,
   Paperclip,
   RotateCw,
+  Search,
   Send,
   UserPlus,
   Users,
@@ -31,7 +33,7 @@ const props = defineProps({
   currentUser: { type: Object, default: null },
   peopleSearchQuery: { type: String, default: '' },
 })
-const emit = defineEmits(['person-selected'])
+const emit = defineEmits(['person-selected', 'chat-open-change'])
 
 const users = ref([])
 const conversations = ref([])
@@ -150,12 +152,14 @@ const openConversation = async (conversation) => {
   if (!conversation) return
   activeConversationId.value = conversation.id
   chatOpen.value = true
+  emit('chat-open-change', true)
   messages.value = []
   await loadMessages(conversation.id)
 }
 
 const closeConversation = () => {
   chatOpen.value = false
+  emit('chat-open-change', false)
   draft.value = ''
   clearFile()
 }
@@ -343,6 +347,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  emit('chat-open-change', false)
 })
 
 defineExpose({
@@ -384,7 +389,7 @@ defineExpose({
     <Transition name="chat-slide">
       <section
         v-if="chatOpen && activeConversation"
-        class="fixed inset-0 z-[180] flex flex-col bg-slate-50 text-slate-800"
+        class="messenger-chat-shell fixed inset-0 z-[180] flex min-h-0 flex-col bg-slate-50 text-slate-800"
         @touchstart.passive="onChatTouchStart"
         @touchend.passive="onChatTouchEnd"
       >
@@ -432,7 +437,7 @@ defineExpose({
 
         <div
           ref="messageList"
-          class="flex-1 space-y-2 overflow-y-auto px-3 py-3"
+          class="messenger-chat-messages flex-1 space-y-2 overflow-y-auto px-3 py-3"
         >
           <div
             v-if="messages.length === 0 && !messagesLoading"
@@ -514,7 +519,7 @@ defineExpose({
         </div>
 
         <form
-          class="shrink-0 border-t border-slate-100 bg-white p-2 pb-safe"
+          class="messenger-composer shrink-0 border-t border-slate-100 bg-white p-2"
           @submit.prevent="sendMessage"
         >
           <div
@@ -703,6 +708,21 @@ defineExpose({
 </template>
 
 <style scoped>
+.messenger-chat-shell {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.messenger-chat-messages {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.messenger-composer {
+  padding-bottom: calc(0.5rem + var(--app-safe-bottom, env(safe-area-inset-bottom)));
+}
+
 .chat-slide-enter-active,
 .chat-slide-leave-active {
   transition:

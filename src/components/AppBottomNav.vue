@@ -11,8 +11,7 @@ const emit = defineEmits(['navigate'])
 
 <template>
   <nav
-    class="fixed left-0 right-0 z-[100] px-4 pb-safe nav-safe"
-    :style="{ bottom: 'calc(0.35rem + env(safe-area-inset-bottom))' }"
+    class="app-bottom-nav fixed left-0 right-0 z-[100] px-4 pb-safe nav-safe"
   >
     <div class="max-w-md mx-auto mb-3">
       <div
@@ -40,6 +39,10 @@ const emit = defineEmits(['navigate'])
 </template>
 
 <style scoped>
+.app-bottom-nav {
+  bottom: var(--app-nav-bottom, calc(0.35rem + env(safe-area-inset-bottom)));
+}
+
 .kof-tabbar {
   background: rgba(2, 6, 23, 0.95);
   border-radius: 16px;
