@@ -58,8 +58,10 @@ const sending = ref(false)
 const errorMessage = ref('')
 const startingUserId = ref(null)
 const touchStart = ref({ x: 0, y: 0 })
+const composerTouchStart = ref({ x: 0, y: 0 })
 const chatViewportHeight = ref('100dvh')
 const chatViewportTop = ref('0px')
+const standalonePwa = ref(false)
 let refreshTimer = null
 
 const activeConversation = computed(() =>
@@ -135,6 +137,18 @@ const focusMessageInput = async () => {
   messageInput.value?.focus?.({ preventScroll: true })
 }
 
+const blurMessageInput = () => {
+  if (document.activeElement !== messageInput.value) return
+  messageInput.value?.blur()
+}
+
+const detectStandalonePwa = () => {
+  standalonePwa.value =
+    window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.matchMedia?.('(display-mode: fullscreen)')?.matches ||
+    window.navigator?.standalone === true
+}
+
 const updateChatViewportHeight = () => {
   const shouldKeepBottom = chatOpen.value && isMessageListNearBottom()
   const viewport = window.visualViewport
@@ -202,6 +216,7 @@ const closeConversation = () => {
   emit('chat-open-change', false)
   draft.value = ''
   clearFile()
+  blurMessageInput()
 }
 
 const togglePeoplePanel = () => {
@@ -359,17 +374,43 @@ const onChatTouchStart = (event) => {
 }
 
 const onChatTouchEnd = (event) => {
+  if (!standalonePwa.value) return
   const touch = event.changedTouches?.[0]
   if (!touch) return
 
   const deltaX = touch.clientX - touchStart.value.x
   const deltaY = touch.clientY - touchStart.value.y
-  if (deltaX > -80 || Math.abs(deltaX) < Math.abs(deltaY) * 1.3) return
+  const startedAtLeftEdge = touchStart.value.x <= 34
+  const isRightSwipe = deltaX > 72 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4
+  if (!startedAtLeftEdge || !isRightSwipe) return
 
   closeConversation()
 }
 
+const onMessagesPointerDown = (event) => {
+  const interactive = event.target?.closest?.('a, button, input, textarea, select')
+  if (interactive) return
+  blurMessageInput()
+}
+
+const onComposerTouchStart = (event) => {
+  const touch = event.touches?.[0]
+  if (!touch) return
+  composerTouchStart.value = { x: touch.clientX, y: touch.clientY }
+}
+
+const onComposerTouchEnd = (event) => {
+  const touch = event.changedTouches?.[0]
+  if (!touch) return
+
+  const deltaX = touch.clientX - composerTouchStart.value.x
+  const deltaY = touch.clientY - composerTouchStart.value.y
+  if (deltaY < 46 || Math.abs(deltaY) < Math.abs(deltaX) * 1.2) return
+  blurMessageInput()
+}
+
 onMounted(async () => {
+  detectStandalonePwa()
   updateChatViewportHeight()
   window.visualViewport?.addEventListener('resize', updateChatViewportHeight)
   window.visualViewport?.addEventListener('scroll', updateChatViewportHeight)
@@ -502,6 +543,7 @@ defineExpose({
         <div
           ref="messageList"
           class="messenger-chat-messages flex-1 overflow-y-auto px-3 py-3"
+          @pointerdown="onMessagesPointerDown"
         >
           <div
             v-if="messages.length === 0 && !messagesLoading"
@@ -590,6 +632,8 @@ defineExpose({
         <form
           class="messenger-composer shrink-0 border-t border-slate-100 bg-white"
           @submit.prevent="sendMessage"
+          @touchstart.passive="onComposerTouchStart"
+          @touchend.passive="onComposerTouchEnd"
         >
           <div
             v-if="selectedFile"
