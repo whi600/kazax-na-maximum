@@ -59,6 +59,7 @@ const errorMessage = ref('')
 const startingUserId = ref(null)
 const touchStart = ref({ x: 0, y: 0 })
 const chatViewportHeight = ref('100dvh')
+const chatViewportTop = ref('0px')
 let refreshTimer = null
 
 const activeConversation = computed(() =>
@@ -123,14 +124,40 @@ const scrollToBottom = async () => {
   messageList.value.scrollTop = messageList.value.scrollHeight
 }
 
+const isMessageListNearBottom = () => {
+  const list = messageList.value
+  if (!list) return true
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80
+}
+
 const focusMessageInput = async () => {
   await nextTick()
   messageInput.value?.focus?.({ preventScroll: true })
 }
 
 const updateChatViewportHeight = () => {
-  const height = window.visualViewport?.height || window.innerHeight
+  const shouldKeepBottom = chatOpen.value && isMessageListNearBottom()
+  const viewport = window.visualViewport
+  const height = viewport?.height || window.innerHeight
+  const offsetTop = viewport?.offsetTop || 0
   chatViewportHeight.value = `${Math.round(height)}px`
+  chatViewportTop.value = `${Math.round(offsetTop)}px`
+
+  if (shouldKeepBottom) {
+    requestAnimationFrame(() => {
+      scrollToBottom()
+    })
+  }
+}
+
+const adjustMessageInputHeight = async () => {
+  const shouldKeepBottom = isMessageListNearBottom()
+  await nextTick()
+  const input = messageInput.value
+  if (!input) return
+  input.style.height = 'auto'
+  input.style.height = `${Math.min(input.scrollHeight, 120)}px`
+  if (shouldKeepBottom) await scrollToBottom()
 }
 
 const clearFile = () => {
@@ -146,12 +173,13 @@ const loadUsers = async () => {
 const loadMessages = async (conversationId, { silent = false } = {}) => {
   if (!conversationId) return
   if (!silent) messagesLoading.value = true
+  const shouldKeepBottom = !silent || isMessageListNearBottom()
   try {
     const response = await messengerApi.messages(conversationId)
     if (activeConversationId.value === conversationId) {
       messages.value = response.messages || []
       upsertConversation(response.conversation)
-      await scrollToBottom()
+      if (shouldKeepBottom) await scrollToBottom()
     }
   } catch (error) {
     if (!silent) errorMessage.value = error?.message || 'Не удалось загрузить сообщения'
@@ -167,7 +195,6 @@ const openConversation = async (conversation) => {
   emit('chat-open-change', true)
   messages.value = []
   await loadMessages(conversation.id)
-  await focusMessageInput()
 }
 
 const closeConversation = () => {
@@ -315,6 +342,7 @@ const sendMessage = async () => {
     upsertConversation(response.conversation)
     draft.value = ''
     clearFile()
+    await adjustMessageInputHeight()
     await scrollToBottom()
     await focusMessageInput()
   } catch (error) {
@@ -377,8 +405,11 @@ watch(chatOpen, (open) => {
   document.documentElement.classList.toggle('messenger-chat-lock', open)
   if (open) {
     updateChatViewportHeight()
-    focusMessageInput()
   }
+})
+
+watch(draft, () => {
+  adjustMessageInputHeight()
 })
 
 defineExpose({
@@ -420,8 +451,8 @@ defineExpose({
     <Transition name="chat-slide">
       <section
         v-if="chatOpen && activeConversation"
-        class="messenger-chat-shell fixed inset-0 z-[180] flex min-h-0 flex-col bg-slate-50 text-slate-800"
-        :style="{ height: chatViewportHeight }"
+        class="messenger-chat-shell fixed left-0 right-0 z-[180] flex min-h-0 flex-col bg-slate-50 text-slate-800"
+        :style="{ top: chatViewportTop, height: chatViewportHeight }"
         @click.stop
         @touchstart.passive="onChatTouchStart"
         @touchend.passive="onChatTouchEnd"
@@ -470,7 +501,7 @@ defineExpose({
 
         <div
           ref="messageList"
-          class="messenger-chat-messages flex-1 space-y-2 overflow-y-auto px-3 py-3"
+          class="messenger-chat-messages flex-1 overflow-y-auto px-3 py-3"
         >
           <div
             v-if="messages.length === 0 && !messagesLoading"
@@ -482,77 +513,82 @@ defineExpose({
             </div>
           </div>
 
-          <div
-            v-for="message in messages"
-            :key="message.id"
-            class="flex"
-            :class="isMine(message) ? 'justify-end' : 'justify-start'"
-          >
+          <div v-else class="messenger-message-stack">
             <div
-              class="max-w-[82%] rounded-lg px-3 py-2 shadow-sm"
-              :class="
-                isMine(message)
-                  ? 'bg-blue-600 text-white'
-                  : 'border border-slate-100 bg-white text-slate-800'
-              "
+              v-for="message in messages"
+              :key="message.id"
+              class="flex"
+              :class="isMine(message) ? 'justify-end' : 'justify-start'"
             >
-              <p
-                v-if="!isMine(message)"
-                class="mb-1 text-[8px] font-black uppercase text-slate-400"
+              <div
+                class="max-w-[82%] rounded-lg px-3 py-2 shadow-sm"
+                :class="
+                  isMine(message)
+                    ? 'bg-blue-600 text-white'
+                    : 'border border-slate-100 bg-white text-slate-800'
+                "
               >
-                {{ message.sender_name }}
-              </p>
-
-              <p v-if="message.body" class="whitespace-pre-wrap break-words text-[12px] font-bold leading-snug">
-                {{ message.body }}
-              </p>
-
-              <div v-if="message.attachments?.length" class="mt-2 space-y-1.5">
-                <a
-                  v-for="attachment in message.attachments"
-                  :key="attachment.id"
-                  :href="attachment.url"
-                  target="_blank"
-                  rel="noreferrer"
-                  class="block overflow-hidden rounded-lg border text-left"
-                  :class="isMine(message) ? 'border-white/20 bg-white/10' : 'border-slate-100 bg-slate-50'"
+                <p
+                  v-if="!isMine(message)"
+                  class="mb-1 text-[8px] font-black uppercase text-slate-400"
                 >
-                  <img
-                    v-if="isImageAttachment(attachment)"
-                    :src="attachment.url"
-                    :alt="attachment.original_name"
-                    class="max-h-52 w-full object-cover"
-                  />
-                  <span class="flex items-center gap-2 px-2 py-2">
-                    <ImageIcon v-if="isImageAttachment(attachment)" class="h-4 w-4 shrink-0" />
-                    <FileText v-else class="h-4 w-4 shrink-0" />
-                    <span class="min-w-0">
-                      <span class="block truncate text-[10px] font-black">
-                        {{ attachment.original_name }}
-                      </span>
-                      <span
-                        class="block text-[8px] font-black uppercase"
-                        :class="isMine(message) ? 'text-blue-100' : 'text-slate-400'"
-                      >
-                        {{ formatBytes(attachment.size) }}
+                  {{ message.sender_name }}
+                </p>
+
+                <p
+                  v-if="message.body"
+                  class="whitespace-pre-wrap break-words text-[12px] font-bold leading-snug"
+                >
+                  {{ message.body }}
+                </p>
+
+                <div v-if="message.attachments?.length" class="mt-2 space-y-1.5">
+                  <a
+                    v-for="attachment in message.attachments"
+                    :key="attachment.id"
+                    :href="attachment.url"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="block overflow-hidden rounded-lg border text-left"
+                    :class="isMine(message) ? 'border-white/20 bg-white/10' : 'border-slate-100 bg-slate-50'"
+                  >
+                    <img
+                      v-if="isImageAttachment(attachment)"
+                      :src="attachment.url"
+                      :alt="attachment.original_name"
+                      class="max-h-52 w-full object-cover"
+                    />
+                    <span class="flex items-center gap-2 px-2 py-2">
+                      <ImageIcon v-if="isImageAttachment(attachment)" class="h-4 w-4 shrink-0" />
+                      <FileText v-else class="h-4 w-4 shrink-0" />
+                      <span class="min-w-0">
+                        <span class="block truncate text-[10px] font-black">
+                          {{ attachment.original_name }}
+                        </span>
+                        <span
+                          class="block text-[8px] font-black uppercase"
+                          :class="isMine(message) ? 'text-blue-100' : 'text-slate-400'"
+                        >
+                          {{ formatBytes(attachment.size) }}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                </a>
-              </div>
+                  </a>
+                </div>
 
-              <p
-                class="mt-1 text-right text-[8px] font-black uppercase"
-                :class="isMine(message) ? 'text-blue-100' : 'text-slate-300'"
-              >
-                {{ formatMessageTime(message.created_at) }}
-              </p>
+                <p
+                  class="mt-1 text-right text-[8px] font-black uppercase"
+                  :class="isMine(message) ? 'text-blue-100' : 'text-slate-300'"
+                >
+                  {{ formatMessageTime(message.created_at) }}
+                </p>
+              </div>
             </div>
           </div>
         </div>
 
         <form
-          class="messenger-composer shrink-0 border-t border-slate-100 bg-white p-2"
+          class="messenger-composer shrink-0 border-t border-slate-100 bg-white"
           @submit.prevent="sendMessage"
         >
           <div
@@ -604,11 +640,11 @@ defineExpose({
               class="messenger-message-input min-w-0 flex-1 resize-none rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-[12px] font-bold leading-5 text-slate-800 placeholder:text-slate-300 disabled:opacity-50"
             ></textarea>
             <button
-              type="submit"
+              type="button"
               :disabled="sending || !hasDraft"
               class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-100 disabled:opacity-40 active:scale-95 transition-all"
               aria-label="Отправить"
-              @pointerdown.prevent
+              @pointerdown.prevent="sendMessage"
             >
               <RotateCw v-if="sending" class="h-5 w-5 animate-spin" />
               <Send v-else class="h-5 w-5" />
@@ -757,8 +793,16 @@ defineExpose({
   -webkit-overflow-scrolling: touch;
 }
 
+.messenger-message-stack {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .messenger-composer {
-  padding-bottom: calc(0.5rem + var(--app-safe-bottom, env(safe-area-inset-bottom)));
+  padding: 0.5rem 0.75rem calc(0.75rem + var(--app-safe-bottom, env(safe-area-inset-bottom)));
 }
 
 .messenger-message-input {
