@@ -67,6 +67,15 @@ npm run build
 npm run start
 ```
 
+Обновить продакшен-сервер из GitHub и пересобрать Docker:
+
+```bash
+/opt/kofeteriy/app/scripts/update-production.sh
+```
+
+Скрипт подтягивает `master`, пересобирает контейнер приложения, сохраняет
+PostgreSQL-данные в `/opt/kofeteriy/postgres` и проверяет `/api/health`.
+
 ## Хранилище данных
 
 - Таблицы PostgreSQL, миграции и базовые товары применяются автоматически при старте backend.
