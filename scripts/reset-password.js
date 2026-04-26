@@ -1,5 +1,4 @@
 import { randomBytes, scryptSync } from 'node:crypto'
-import { db, dbPath } from '../server/db.js'
 
 const [, , rawEmail, rawPassword] = process.argv
 const email = String(rawEmail || '').trim().toLowerCase()
@@ -20,12 +19,15 @@ if (password.length < 6) {
   process.exit(1)
 }
 
-const user = db
+const { db, dbPath } = await import('../server/db.js')
+
+const user = await db
   .prepare('SELECT id, email, name, role FROM users WHERE email = ?')
   .get(email)
 
 if (!user) {
   console.error(`User not found: ${email}`)
+  await db.close()
   process.exit(1)
 }
 
@@ -33,16 +35,21 @@ const salt = randomBytes(16).toString('hex')
 const hash = scryptSync(password, salt, 64).toString('hex')
 const passwordHash = `${salt}:${hash}`
 
-db.exec('BEGIN')
 try {
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id)
-  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id)
-  db.exec('COMMIT')
+  const updateUserPassword = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+  const deleteUserSessions = db.prepare('DELETE FROM sessions WHERE user_id = ?')
+
+  await db.transaction(async (client) => {
+    await updateUserPassword.runOn(client, passwordHash, user.id)
+    await deleteUserSessions.runOn(client, user.id)
+  })
 } catch (error) {
-  db.exec('ROLLBACK')
+  await db.close()
   throw error
 }
 
 console.log(`Password reset for ${user.email} (${user.role})`)
 console.log(`Database: ${dbPath}`)
 console.log('Existing sessions for this user were removed.')
+
+await db.close()

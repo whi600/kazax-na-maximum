@@ -63,7 +63,7 @@ const allowedAttachmentExtensions = new Set([
 const distDir = path.resolve(process.cwd(), 'dist')
 const hasDist = fs.existsSync(distDir)
 
-const getUsersCountStatement = db.prepare('SELECT COUNT(*) AS count FROM users')
+const getUsersCountStatement = db.prepare('SELECT COUNT(*)::int AS count FROM users')
 const getUserByEmailStatement = db.prepare('SELECT * FROM users WHERE email = ?')
 const getUserByIdStatement = db.prepare(
   'SELECT id, email, name, role, created_at FROM users WHERE id = ?',
@@ -77,7 +77,7 @@ const updateUserRoleStatement = db.prepare(
   "UPDATE users SET role = ? WHERE id = ?",
 )
 const createUserStatement = db.prepare(
-  'INSERT INTO users(email, password_hash, name, role) VALUES (?, ?, ?, ?)',
+  'INSERT INTO users(email, password_hash, name, role) VALUES (?, ?, ?, ?) RETURNING id',
 )
 const createSessionStatement = db.prepare(
   'INSERT INTO sessions(id, user_id, expires_at) VALUES (?, ?, ?)',
@@ -107,7 +107,7 @@ const getProductByIdStatement = db.prepare(
   'SELECT id, name, category, unit FROM products WHERE id = ?',
 )
 const insertProductStatement = db.prepare(
-  "INSERT INTO products(name, category, unit) VALUES (?, ?, ?)",
+  "INSERT INTO products(name, category, unit) VALUES (?, ?, ?) RETURNING id",
 )
 const updateProductStatement = db.prepare(
   "UPDATE products SET name = ?, category = ?, unit = ? WHERE id = ?",
@@ -226,6 +226,7 @@ const getShiftByIdStatement = db.prepare(
 const insertShiftStatement = db.prepare(`
   INSERT INTO shifts(date, start_time, end_time, employee_name, status, created_by, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  RETURNING id
 `)
 
 const updateShiftEmployeeStatement = db.prepare(
@@ -252,7 +253,7 @@ const listEditingPresenceStatement = db.prepare(`
   SELECT resource, user_id, user_name, updated_at
   FROM editing_presence
   WHERE resource = ?
-    AND updated_at >= datetime('now', '-35 seconds')
+    AND updated_at >= CURRENT_TIMESTAMP - INTERVAL '35 seconds'
   ORDER BY updated_at DESC
 `)
 const upsertResourceStateStatement = db.prepare(`
@@ -278,7 +279,7 @@ const insertAuditLogStatement = db.prepare(`
     context_json,
     created_at
   )
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, datetime('now'))
 `)
 const listAuditLogStatement = db.prepare(`
   SELECT
@@ -300,7 +301,7 @@ const listAuditLogStatement = db.prepare(`
 const listUsersForMessengerStatement = db.prepare(`
   SELECT id, email, name, role, created_at
   FROM users
-  ORDER BY name COLLATE NOCASE ASC, email ASC
+  ORDER BY LOWER(name) ASC, email ASC
 `)
 const getConversationByDirectKeyStatement = db.prepare(
   'SELECT id, type, title, direct_key, created_by, created_at, updated_at FROM conversations WHERE direct_key = ?',
@@ -311,10 +312,12 @@ const getConversationByIdStatement = db.prepare(
 const createConversationStatement = db.prepare(`
   INSERT INTO conversations(type, title, direct_key, created_by, updated_at)
   VALUES (?, ?, ?, ?, datetime('now'))
+  RETURNING id
 `)
 const addConversationMemberStatement = db.prepare(`
-  INSERT OR IGNORE INTO conversation_members(conversation_id, user_id)
+  INSERT INTO conversation_members(conversation_id, user_id)
   VALUES (?, ?)
+  ON CONFLICT(conversation_id, user_id) DO NOTHING
 `)
 const isConversationMemberStatement = db.prepare(`
   SELECT 1 AS ok
@@ -352,7 +355,7 @@ const listConversationMembersStatement = db.prepare(`
   FROM conversation_members cm
   JOIN users u ON u.id = cm.user_id
   WHERE cm.conversation_id = ?
-  ORDER BY u.name COLLATE NOCASE ASC
+  ORDER BY LOWER(u.name) ASC
 `)
 const listMessagesStatement = db.prepare(`
   SELECT
@@ -440,6 +443,7 @@ const listAttachmentsForMessageStatement = db.prepare(`
 const insertMessageStatement = db.prepare(`
   INSERT INTO messages(conversation_id, sender_user_id, body, reply_to_message_id)
   VALUES (?, ?, ?, ?)
+  RETURNING id
 `)
 const insertAttachmentStatement = db.prepare(`
   INSERT INTO message_attachments(
@@ -774,33 +778,33 @@ const verifyPassword = (password, stored) => {
   return timingSafeEqual(hashBuffer, inputBuffer)
 }
 
-const createSession = (userId) => {
+const createSession = async (userId) => {
   const sessionId = randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString()
-  createSessionStatement.run(sessionId, userId, expiresAt)
+  await createSessionStatement.run(sessionId, userId, expiresAt)
   return sessionId
 }
 
-const getCurrentUser = (req) => {
-  deleteExpiredSessionsStatement.run()
+const getCurrentUser = async (req) => {
+  await deleteExpiredSessionsStatement.run()
 
   const cookies = parseCookies(req)
   const sessionId = cookies[SESSION_COOKIE]
   if (!sessionId) return null
 
-  const row = getSessionUserStatement.get(sessionId)
+  const row = await getSessionUserStatement.get(sessionId)
   if (!row) return null
 
   if (new Date(row.expires_at).getTime() <= Date.now()) {
-    deleteSessionStatement.run(sessionId)
+    await deleteSessionStatement.run(sessionId)
     return null
   }
 
   return sanitizeUser(row)
 }
 
-const requireUser = (req, res) => {
-  const user = getCurrentUser(req)
+const requireUser = async (req, res) => {
+  const user = await getCurrentUser(req)
   if (!user) {
     unauthorized(res)
     return null
@@ -808,8 +812,8 @@ const requireUser = (req, res) => {
   return user
 }
 
-const requireAdmin = (req, res) => {
-  const user = requireUser(req, res)
+const requireAdmin = async (req, res) => {
+  const user = await requireUser(req, res)
   if (!user) return null
   if (user.role !== 'admin') {
     forbidden(res)
@@ -840,16 +844,16 @@ const mapPermissionsRow = (row) => {
   }
 }
 
-const getUserPermissions = (user) => {
-  const row = getRolePermissionsStatement.get(user?.role || 'employee')
+const getUserPermissions = async (user) => {
+  const row = await getRolePermissionsStatement.get(user?.role || 'employee')
   return mapPermissionsRow(row)
 }
 
-const requirePermission = (req, res, key) => {
-  const user = requireUser(req, res)
+const requirePermission = async (req, res, key) => {
+  const user = await requireUser(req, res)
   if (!user) return null
 
-  const permissions = getUserPermissions(user)
+  const permissions = await getUserPermissions(user)
   if (!permissions[key]) {
     forbidden(res)
     return null
@@ -917,7 +921,19 @@ const toAuditPayload = (value) => {
   }
 }
 
-const logAudit = ({
+const parseAuditJson = (value) => {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  return value
+}
+
+const logAudit = async ({
   actorUser,
   entityType,
   entityId = null,
@@ -928,7 +944,7 @@ const logAudit = ({
 }) => {
   if (!actorUser?.id || !action || !entityType) return
 
-  insertAuditLogStatement.run(
+  await insertAuditLogStatement.run(
     actorUser.id,
     actorUser.name || actorUser.email || 'system',
     String(entityType),
@@ -940,9 +956,9 @@ const logAudit = ({
   )
 }
 
-const touchResource = (resource, actorUser) => {
+const touchResource = async (resource, actorUser) => {
   if (!isEditableResource(resource)) return
-  upsertResourceStateStatement.run(resource, actorUser?.name || actorUser?.email || 'system')
+  await upsertResourceStateStatement.run(resource, actorUser?.name || actorUser?.email || 'system')
 }
 
 const normalizeProductCategory = (value) => {
@@ -1004,8 +1020,8 @@ const mapMessengerUser = (row) => ({
   created_at: row.created_at,
 })
 
-const conversationToDto = (row, currentUser) => {
-  const members = listConversationMembersStatement.all(row.id).map(mapMessengerUser)
+const conversationToDto = async (row, currentUser) => {
+  const members = (await listConversationMembersStatement.all(row.id)).map(mapMessengerUser)
   const otherMember = members.find((member) => member.id !== currentUser.id) || members[0]
   const displayTitle =
     row.type === 'direct'
@@ -1068,11 +1084,11 @@ const messageToDto = (row, attachments = []) => ({
   attachments: attachments.map(attachmentToDto),
 })
 
-const listMessageDtos = (conversationId, limit) => {
-  const messageRows = listMessagesStatement.all(conversationId, conversationId, limit)
+const listMessageDtos = async (conversationId, limit) => {
+  const messageRows = await listMessagesStatement.all(conversationId, conversationId, limit)
   const attachmentsByMessage = new Map()
 
-  for (const attachment of listAttachmentsForConversationStatement.all(conversationId)) {
+  for (const attachment of await listAttachmentsForConversationStatement.all(conversationId)) {
     const list = attachmentsByMessage.get(attachment.message_id) || []
     list.push(attachment)
     attachmentsByMessage.set(attachment.message_id, list)
@@ -1083,14 +1099,14 @@ const listMessageDtos = (conversationId, limit) => {
   )
 }
 
-const ensureConversationMember = (conversationId, user, res) => {
-  const conversation = getConversationByIdStatement.get(conversationId)
+const ensureConversationMember = async (conversationId, user, res) => {
+  const conversation = await getConversationByIdStatement.get(conversationId)
   if (!conversation) {
     notFound(res, 'Диалог не найден')
     return null
   }
 
-  const member = isConversationMemberStatement.get(conversationId, user.id)
+  const member = await isConversationMemberStatement.get(conversationId, user.id)
   if (!member) {
     forbidden(res, 'У вас нет доступа к этому диалогу')
     return null
@@ -1133,13 +1149,13 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const existing = getUserByEmailStatement.get(email)
+      const existing = await getUserByEmailStatement.get(email)
       if (existing) {
         json(res, 409, { error: 'Пользователь с таким email уже существует' })
         return
       }
 
-      const usersCount = getUsersCountStatement.get().count
+      const usersCount = (await getUsersCountStatement.get()).count
       const role =
         usersCount === 0 || adminEmails.has(email)
           ? 'admin'
@@ -1147,11 +1163,11 @@ const appServer = http.createServer((req, res) => {
 
       const name = displayName || email.split('@')[0] || 'Сотрудник'
       const passwordHash = hashPassword(password)
-      const insertResult = createUserStatement.run(email, passwordHash, name, role)
+      const insertResult = await createUserStatement.run(email, passwordHash, name, role)
       const userId = Number(insertResult.lastInsertRowid)
-      const user = getUserByIdStatement.get(userId)
+      const user = await getUserByIdStatement.get(userId)
 
-      const sessionId = createSession(userId)
+      const sessionId = await createSession(userId)
       setSessionCookie(res, sessionId)
       json(res, 201, { user: sanitizeUser(user) })
       return
@@ -1162,13 +1178,13 @@ const appServer = http.createServer((req, res) => {
       const email = String(body.email || '').trim().toLowerCase()
       const password = String(body.password || '')
 
-      const user = getUserByEmailStatement.get(email)
+      const user = await getUserByEmailStatement.get(email)
       if (!user || !verifyPassword(password, user.password_hash)) {
         unauthorized(res, 'Неверный email или пароль')
         return
       }
 
-      const sessionId = createSession(user.id)
+      const sessionId = await createSession(user.id)
       setSessionCookie(res, sessionId)
       json(res, 200, { user: sanitizeUser(user) })
       return
@@ -1178,7 +1194,7 @@ const appServer = http.createServer((req, res) => {
       const cookies = parseCookies(req)
       const sessionId = cookies[SESSION_COOKIE]
       if (sessionId) {
-        deleteSessionStatement.run(sessionId)
+        await deleteSessionStatement.run(sessionId)
       }
       clearSessionCookie(res)
       json(res, 200, { ok: true })
@@ -1186,32 +1202,32 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/auth/me' && req.method === 'GET') {
-      const user = getCurrentUser(req)
+      const user = await getCurrentUser(req)
       json(res, 200, { user })
       return
     }
 
     if (pathname === '/api/auth/permissions' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
       json(res, 200, {
-        permissions: getUserPermissions(user),
+        permissions: await getUserPermissions(user),
         isSuperAdmin: isSuperAdminUser(user),
       })
       return
     }
 
     if (pathname === '/api/products' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const products = listProductsStatement.all()
+      const products = await listProductsStatement.all()
       json(res, 200, { products })
       return
     }
 
     if (pathname === '/api/products' && req.method === 'POST') {
-      const access = requirePermission(req, res, 'productsManage')
+      const access = await requirePermission(req, res, 'productsManage')
       if (!access) return
       const { user } = access
 
@@ -1225,10 +1241,10 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const result = insertProductStatement.run(name, category, unit)
-      const product = getProductByIdStatement.get(Number(result.lastInsertRowid))
-      touchResource('assortment', user)
-      logAudit({
+      const result = await insertProductStatement.run(name, category, unit)
+      const product = await getProductByIdStatement.get(Number(result.lastInsertRowid))
+      await touchResource('assortment', user)
+      await logAudit({
         actorUser: user,
         entityType: 'product',
         entityId: product?.id,
@@ -1241,11 +1257,11 @@ const appServer = http.createServer((req, res) => {
 
     const productId = parseProductId(pathname)
     if (productId && req.method === 'PATCH') {
-      const access = requirePermission(req, res, 'productsManage')
+      const access = await requirePermission(req, res, 'productsManage')
       if (!access) return
       const { user } = access
 
-      const existing = getProductByIdStatement.get(productId)
+      const existing = await getProductByIdStatement.get(productId)
       if (!existing) {
         notFound(res, 'Товар не найден')
         return
@@ -1265,10 +1281,10 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      updateProductStatement.run(name, category, unit, productId)
-      const product = getProductByIdStatement.get(productId)
-      touchResource('assortment', user)
-      logAudit({
+      await updateProductStatement.run(name, category, unit, productId)
+      const product = await getProductByIdStatement.get(productId)
+      await touchResource('assortment', user)
+      await logAudit({
         actorUser: user,
         entityType: 'product',
         entityId: productId,
@@ -1281,19 +1297,19 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (productId && req.method === 'DELETE') {
-      const access = requirePermission(req, res, 'productsManage')
+      const access = await requirePermission(req, res, 'productsManage')
       if (!access) return
       const { user } = access
 
-      const existing = getProductByIdStatement.get(productId)
+      const existing = await getProductByIdStatement.get(productId)
       if (!existing) {
         notFound(res, 'Товар не найден')
         return
       }
 
-      deleteProductStatement.run(productId)
-      touchResource('assortment', user)
-      logAudit({
+      await deleteProductStatement.run(productId)
+      await touchResource('assortment', user)
+      await logAudit({
         actorUser: user,
         entityType: 'product',
         entityId: productId,
@@ -1305,11 +1321,11 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/daily-records/today' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
       const today = getToday()
-      const rows = listTodayRecordsStatement.all(today)
+      const rows = await listTodayRecordsStatement.all(today)
       const entries = rows.map((row) => ({
         product_id: row.product_id,
         name: row.name,
@@ -1325,7 +1341,7 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/daily-records/today' && req.method === 'PUT') {
-      const access = requirePermission(req, res, 'reportEdit')
+      const access = await requirePermission(req, res, 'reportEdit')
       if (!access) return
       const { user } = access
 
@@ -1333,9 +1349,8 @@ const appServer = http.createServer((req, res) => {
       const entries = Array.isArray(body.entries) ? body.entries : []
       const today = getToday()
 
-      db.exec('BEGIN')
-      try {
-        deleteTodayRecordsStatement.run(today)
+      await db.transaction(async (client) => {
+        await deleteTodayRecordsStatement.runOn(client, today)
 
         for (const item of entries) {
           const productId = Number(item.product_id)
@@ -1356,7 +1371,8 @@ const appServer = http.createServer((req, res) => {
             continue
           }
 
-          insertDailyRecordStatement.run(
+          await insertDailyRecordStatement.runOn(
+            client,
             today,
             productId,
             normalizedArrival,
@@ -1365,22 +1381,17 @@ const appServer = http.createServer((req, res) => {
             user.id,
           )
         }
-
-        db.exec('COMMIT')
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
-      }
+      })
 
       json(res, 200, { ok: true })
       return
     }
 
     if (pathname === '/api/archive/records' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const rows = listArchiveRecordsStatement.all()
+      const rows = await listArchiveRecordsStatement.all()
       const records = rows.map((row) => ({
         id: row.id,
         product_id: row.product_id,
@@ -1396,25 +1407,25 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/shifts/upcoming' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const rows = listUpcomingShiftsStatement.all(getToday())
+      const rows = await listUpcomingShiftsStatement.all(getToday())
       json(res, 200, { shifts: rows.map(toShiftDto) })
       return
     }
 
     if (pathname === '/api/shifts/archive' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const rows = listAllShiftsStatement.all()
+      const rows = await listAllShiftsStatement.all()
       json(res, 200, { shifts: rows.map(toShiftDto) })
       return
     }
 
     if (pathname === '/api/shifts/help-request' && req.method === 'POST') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
       const body = await readJsonBody(req)
@@ -1427,7 +1438,7 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const result = insertShiftStatement.run(
+      const result = await insertShiftStatement.run(
         date,
         startTime,
         endTime,
@@ -1435,8 +1446,8 @@ const appServer = http.createServer((req, res) => {
         'pending',
         user.id,
       )
-      touchResource('schedule', user)
-      logAudit({
+      await touchResource('schedule', user)
+      await logAudit({
         actorUser: user,
         entityType: 'shift',
         entityId: Number(result.lastInsertRowid),
@@ -1455,7 +1466,7 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/shifts/admin-create' && req.method === 'POST') {
-      const access = requirePermission(req, res, 'scheduleManage')
+      const access = await requirePermission(req, res, 'scheduleManage')
       if (!access) return
       const { user } = access
 
@@ -1469,7 +1480,7 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const result = insertShiftStatement.run(
+      const result = await insertShiftStatement.run(
         date,
         startTime,
         endTime,
@@ -1477,8 +1488,8 @@ const appServer = http.createServer((req, res) => {
         'approved',
         user.id,
       )
-      touchResource('schedule', user)
-      logAudit({
+      await touchResource('schedule', user)
+      await logAudit({
         actorUser: user,
         entityType: 'shift',
         entityId: Number(result.lastInsertRowid),
@@ -1497,7 +1508,7 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/shifts/bulk-save' && req.method === 'POST') {
-      const access = requirePermission(req, res, 'scheduleManage')
+      const access = await requirePermission(req, res, 'scheduleManage')
       if (!access) return
       const { user } = access
 
@@ -1505,15 +1516,14 @@ const appServer = http.createServer((req, res) => {
       const deletedIds = Array.isArray(body.deletedIds) ? body.deletedIds : []
       const newShifts = Array.isArray(body.newShifts) ? body.newShifts : []
 
-      db.exec('BEGIN')
-      try {
+      const { deletedSnapshot, createdIds } = await db.transaction(async (client) => {
         const deletedSnapshot = []
         for (const id of deletedIds) {
           const shiftId = Number(id)
           if (!Number.isFinite(shiftId)) continue
-          const existingShift = getShiftByIdStatement.get(shiftId)
+          const existingShift = await getShiftByIdStatement.getOn(client, shiftId)
           if (existingShift) deletedSnapshot.push(existingShift)
-          deleteShiftStatement.run(shiftId)
+          await deleteShiftStatement.runOn(client, shiftId)
         }
 
         const createdIds = []
@@ -1523,7 +1533,8 @@ const appServer = http.createServer((req, res) => {
           const endTime = String(shift.end_time || '')
           if (!date || !startTime || !endTime) continue
 
-          const result = insertShiftStatement.run(
+          const result = await insertShiftStatement.runOn(
+            client,
             date,
             startTime,
             endTime,
@@ -1534,24 +1545,22 @@ const appServer = http.createServer((req, res) => {
           createdIds.push(Number(result.lastInsertRowid))
         }
 
-        db.exec('COMMIT')
-        touchResource('schedule', user)
-        if (deletedSnapshot.length > 0 || createdIds.length > 0) {
-          logAudit({
-            actorUser: user,
-            entityType: 'shift',
-            action: 'shift.bulk_save',
-            before: { deleted: deletedSnapshot },
-            after: { createdIds, createdCount: createdIds.length },
-            context: {
-              deletedCount: deletedSnapshot.length,
-              createdCount: createdIds.length,
-            },
-          })
-        }
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
+        return { deletedSnapshot, createdIds }
+      })
+
+      await touchResource('schedule', user)
+      if (deletedSnapshot.length > 0 || createdIds.length > 0) {
+        await logAudit({
+          actorUser: user,
+          entityType: 'shift',
+          action: 'shift.bulk_save',
+          before: { deleted: deletedSnapshot },
+          after: { createdIds, createdCount: createdIds.length },
+          context: {
+            deletedCount: deletedSnapshot.length,
+            createdCount: createdIds.length,
+          },
+        })
       }
 
       json(res, 200, { ok: true })
@@ -1560,10 +1569,10 @@ const appServer = http.createServer((req, res) => {
 
     const shiftAction = parseShiftId(pathname)
     if (shiftAction) {
-      const authUser = requireUser(req, res)
+      const authUser = await requireUser(req, res)
       if (!authUser) return
 
-      const shift = getShiftByIdStatement.get(shiftAction.id)
+      const shift = await getShiftByIdStatement.get(shiftAction.id)
       if (!shift) {
         notFound(res, 'Смена не найдена')
         return
@@ -1575,9 +1584,9 @@ const appServer = http.createServer((req, res) => {
           return
         }
 
-        updateShiftEmployeeStatement.run(authUser.name, shiftAction.id)
-        touchResource('schedule', authUser)
-        logAudit({
+        await updateShiftEmployeeStatement.run(authUser.name, shiftAction.id)
+        await touchResource('schedule', authUser)
+        await logAudit({
           actorUser: authUser,
           entityType: 'shift',
           entityId: shiftAction.id,
@@ -1590,7 +1599,7 @@ const appServer = http.createServer((req, res) => {
       }
 
       if (req.method === 'PATCH' && shiftAction.action === 'unbook') {
-        const authPermissions = getUserPermissions(authUser)
+        const authPermissions = await getUserPermissions(authUser)
         if (
           !authPermissions.scheduleManage &&
           normalizePersonName(shift.employee_name) !== normalizePersonName(authUser.name)
@@ -1599,9 +1608,9 @@ const appServer = http.createServer((req, res) => {
           return
         }
 
-        updateShiftEmployeeStatement.run(null, shiftAction.id)
-        touchResource('schedule', authUser)
-        logAudit({
+        await updateShiftEmployeeStatement.run(null, shiftAction.id)
+        await touchResource('schedule', authUser)
+        await logAudit({
           actorUser: authUser,
           entityType: 'shift',
           entityId: shiftAction.id,
@@ -1614,15 +1623,15 @@ const appServer = http.createServer((req, res) => {
       }
 
       if (req.method === 'PATCH' && shiftAction.action === 'approve') {
-        const authPermissions = getUserPermissions(authUser)
+        const authPermissions = await getUserPermissions(authUser)
         if (!authPermissions.scheduleManage) {
           forbidden(res)
           return
         }
 
-        updateShiftStatusStatement.run('approved', shiftAction.id)
-        touchResource('schedule', authUser)
-        logAudit({
+        await updateShiftStatusStatement.run('approved', shiftAction.id)
+        await touchResource('schedule', authUser)
+        await logAudit({
           actorUser: authUser,
           entityType: 'shift',
           entityId: shiftAction.id,
@@ -1635,15 +1644,15 @@ const appServer = http.createServer((req, res) => {
       }
 
       if (req.method === 'DELETE' && !shiftAction.action) {
-        const authPermissions = getUserPermissions(authUser)
+        const authPermissions = await getUserPermissions(authUser)
         if (!authPermissions.scheduleManage) {
           forbidden(res)
           return
         }
 
-        deleteShiftStatement.run(shiftAction.id)
-        touchResource('schedule', authUser)
-        logAudit({
+        await deleteShiftStatement.run(shiftAction.id)
+        await touchResource('schedule', authUser)
+        await logAudit({
           actorUser: authUser,
           entityType: 'shift',
           entityId: shiftAction.id,
@@ -1656,12 +1665,12 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/audit' && req.method === 'GET') {
-      const access = requirePermission(req, res, 'auditView')
+      const access = await requirePermission(req, res, 'auditView')
       if (!access) return
 
       const limit = Math.max(1, Math.min(100, parseInteger(requestUrl.searchParams.get('limit'), 50)))
       const offset = Math.max(0, parseInteger(requestUrl.searchParams.get('offset'), 0))
-      const rows = listAuditLogStatement.all(limit, offset)
+      const rows = await listAuditLogStatement.all(limit, offset)
       const logs = rows.map((row) => ({
         id: row.id,
         actor_user_id: row.actor_user_id,
@@ -1669,9 +1678,9 @@ const appServer = http.createServer((req, res) => {
         entity_type: row.entity_type,
         entity_id: row.entity_id,
         action: row.action,
-        before: row.before_json ? JSON.parse(row.before_json) : null,
-        after: row.after_json ? JSON.parse(row.after_json) : null,
-        context: row.context_json ? JSON.parse(row.context_json) : null,
+        before: parseAuditJson(row.before_json),
+        after: parseAuditJson(row.after_json),
+        context: parseAuditJson(row.context_json),
         created_at: row.created_at,
       }))
 
@@ -1680,7 +1689,7 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/editing/heartbeat' && req.method === 'POST') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
       const body = await readJsonBody(req)
@@ -1692,7 +1701,7 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const permissions = getUserPermissions(user)
+      const permissions = await getUserPermissions(user)
       if (
         (resource === 'schedule' && !permissions.scheduleManage) ||
         (resource === 'assortment' && !permissions.productsManage)
@@ -1702,9 +1711,9 @@ const appServer = http.createServer((req, res) => {
       }
 
       if (active) {
-        upsertEditingPresenceStatement.run(resource, user.id, user.name || user.email)
+        await upsertEditingPresenceStatement.run(resource, user.id, user.name || user.email)
       } else {
-        removeEditingPresenceStatement.run(resource, user.id)
+        await removeEditingPresenceStatement.run(resource, user.id)
       }
 
       json(res, 200, { ok: true })
@@ -1712,7 +1721,7 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/editing/touch' && req.method === 'POST') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
       const body = await readJsonBody(req)
@@ -1723,7 +1732,7 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const permissions = getUserPermissions(user)
+      const permissions = await getUserPermissions(user)
       if (
         (resource === 'schedule' && !permissions.scheduleManage) ||
         (resource === 'assortment' && !permissions.productsManage)
@@ -1732,13 +1741,13 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      touchResource(resource, user)
+      await touchResource(resource, user)
       json(res, 200, { ok: true })
       return
     }
 
     if (pathname === '/api/editing/status' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
       const resource = String(requestUrl.searchParams.get('resource') || '').trim()
@@ -1747,7 +1756,7 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const permissions = getUserPermissions(user)
+      const permissions = await getUserPermissions(user)
       if (
         (resource === 'schedule' && !permissions.scheduleManage) ||
         (resource === 'assortment' && !permissions.productsManage)
@@ -1756,8 +1765,7 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const activeEditors = listEditingPresenceStatement
-        .all(resource)
+      const activeEditors = (await listEditingPresenceStatement.all(resource))
         .filter((row) => row.user_id !== user.id)
         .map((row) => ({
           user_id: row.user_id,
@@ -1765,7 +1773,7 @@ const appServer = http.createServer((req, res) => {
           updated_at: row.updated_at,
         }))
 
-      const state = getResourceStateStatement.get(resource)
+      const state = await getResourceStateStatement.get(resource)
       json(res, 200, {
         activeEditors,
         lastChangedAt: state?.last_changed_at || null,
@@ -1775,11 +1783,10 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/messenger/users' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const users = listUsersForMessengerStatement
-        .all()
+      const users = (await listUsersForMessengerStatement.all())
         .filter((row) => row.id !== user.id)
         .map(mapMessengerUser)
 
@@ -1788,19 +1795,21 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/messenger/conversations' && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const conversations = listUserConversationsStatement
-        .all(user.id)
-        .map((row) => conversationToDto(row, user))
+      const conversations = await Promise.all(
+        (await listUserConversationsStatement.all(user.id)).map((row) =>
+          conversationToDto(row, user),
+        ),
+      )
 
       json(res, 200, { conversations })
       return
     }
 
     if (pathname === '/api/messenger/conversations/direct' && req.method === 'POST') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
       const body = await readJsonBody(req)
@@ -1814,41 +1823,38 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      const targetUser = getUserByIdStatement.get(targetUserId)
+      const targetUser = await getUserByIdStatement.get(targetUserId)
       if (!targetUser) {
         notFound(res, 'Пользователь не найден')
         return
       }
 
       const directKey = makeDirectConversationKey(user.id, targetUserId)
-      let conversation = getConversationByDirectKeyStatement.get(directKey)
+      let conversation = await getConversationByDirectKeyStatement.get(directKey)
 
       if (!conversation) {
-        db.exec('BEGIN')
-        try {
-          const result = createConversationStatement.run(
+        const conversationId = await db.transaction(async (client) => {
+          const result = await createConversationStatement.runOn(
+            client,
             'direct',
             null,
             directKey,
             user.id,
           )
-          const conversationId = Number(result.lastInsertRowid)
-          addConversationMemberStatement.run(conversationId, user.id)
-          addConversationMemberStatement.run(conversationId, targetUserId)
-          db.exec('COMMIT')
-          conversation = getConversationByIdStatement.get(conversationId)
-        } catch (error) {
-          db.exec('ROLLBACK')
-          throw error
-        }
+          const newConversationId = Number(result.lastInsertRowid)
+          await addConversationMemberStatement.runOn(client, newConversationId, user.id)
+          await addConversationMemberStatement.runOn(client, newConversationId, targetUserId)
+          return newConversationId
+        })
+        conversation = await getConversationByIdStatement.get(conversationId)
       }
 
-      json(res, 200, { conversation: conversationToDto(conversation, user) })
+      json(res, 200, { conversation: await conversationToDto(conversation, user) })
       return
     }
 
     if (pathname === '/api/messenger/conversations/group' && req.method === 'POST') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
       const body = await readJsonBody(req)
@@ -1865,39 +1871,34 @@ const appServer = http.createServer((req, res) => {
       }
 
       for (const memberId of memberIds) {
-        const member = getUserByIdStatement.get(memberId)
+        const member = await getUserByIdStatement.get(memberId)
         if (!member) {
           badRequest(res, 'В списке есть пользователь, которого уже нет')
           return
         }
       }
 
-      let conversationId = null
-      db.exec('BEGIN')
-      try {
-        const result = createConversationStatement.run('group', title, null, user.id)
-        conversationId = Number(result.lastInsertRowid)
-        addConversationMemberStatement.run(conversationId, user.id)
+      const conversationId = await db.transaction(async (client) => {
+        const result = await createConversationStatement.runOn(client, 'group', title, null, user.id)
+        const newConversationId = Number(result.lastInsertRowid)
+        await addConversationMemberStatement.runOn(client, newConversationId, user.id)
         for (const memberId of memberIds) {
-          addConversationMemberStatement.run(conversationId, memberId)
+          await addConversationMemberStatement.runOn(client, newConversationId, memberId)
         }
-        db.exec('COMMIT')
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
-      }
+        return newConversationId
+      })
 
-      const conversation = getConversationByIdStatement.get(conversationId)
-      json(res, 201, { conversation: conversationToDto(conversation, user) })
+      const conversation = await getConversationByIdStatement.get(conversationId)
+      json(res, 201, { conversation: await conversationToDto(conversation, user) })
       return
     }
 
     const messengerMembersConversationId = parseConversationMembersPath(pathname)
     if (messengerMembersConversationId && req.method === 'POST') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const conversation = ensureConversationMember(messengerMembersConversationId, user, res)
+      const conversation = await ensureConversationMember(messengerMembersConversationId, user, res)
       if (!conversation) return
       if (conversation.type !== 'group') {
         badRequest(res, 'Участников можно добавлять только в группу')
@@ -1912,37 +1913,32 @@ const appServer = http.createServer((req, res) => {
       }
 
       for (const memberId of memberIds) {
-        const member = getUserByIdStatement.get(memberId)
+        const member = await getUserByIdStatement.get(memberId)
         if (!member) {
           badRequest(res, 'В списке есть пользователь, которого уже нет')
           return
         }
       }
 
-      db.exec('BEGIN')
-      try {
+      await db.transaction(async (client) => {
         for (const memberId of memberIds) {
-          addConversationMemberStatement.run(messengerMembersConversationId, memberId)
+          await addConversationMemberStatement.runOn(client, messengerMembersConversationId, memberId)
         }
-        updateConversationTimestampStatement.run(messengerMembersConversationId)
-        db.exec('COMMIT')
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
-      }
+        await updateConversationTimestampStatement.runOn(client, messengerMembersConversationId)
+      })
 
-      const updatedConversation = getConversationByIdStatement.get(
+      const updatedConversation = await getConversationByIdStatement.get(
         messengerMembersConversationId,
       )
-      json(res, 200, { conversation: conversationToDto(updatedConversation, user) })
+      json(res, 200, { conversation: await conversationToDto(updatedConversation, user) })
       return
     }
 
     const messengerConversationId = parseConversationMessagesPath(pathname)
     if (messengerConversationId && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
-      const conversation = ensureConversationMember(messengerConversationId, user, res)
+      const conversation = await ensureConversationMember(messengerConversationId, user, res)
       if (!conversation) return
 
       const limit = Math.max(
@@ -1950,16 +1946,16 @@ const appServer = http.createServer((req, res) => {
         Math.min(200, parseInteger(requestUrl.searchParams.get('limit'), 100)),
       )
       json(res, 200, {
-        conversation: conversationToDto(conversation, user),
-        messages: listMessageDtos(messengerConversationId, limit),
+        conversation: await conversationToDto(conversation, user),
+        messages: await listMessageDtos(messengerConversationId, limit),
       })
       return
     }
 
     if (messengerConversationId && req.method === 'POST') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
-      const conversation = ensureConversationMember(messengerConversationId, user, res)
+      const conversation = await ensureConversationMember(messengerConversationId, user, res)
       if (!conversation) return
 
       const contentType = String(req.headers['content-type'] || '').toLowerCase()
@@ -2009,7 +2005,7 @@ const appServer = http.createServer((req, res) => {
       }
 
       if (replyToMessageId) {
-        const repliedMessage = getMessageByIdStatement.get(replyToMessageId)
+        const repliedMessage = await getMessageByIdStatement.get(replyToMessageId)
         if (!repliedMessage || repliedMessage.conversation_id !== messengerConversationId) {
           badRequest(res, 'Сообщение для ответа не найдено в этом чате')
           return
@@ -2018,44 +2014,46 @@ const appServer = http.createServer((req, res) => {
 
       let savedFilePath = null
       let messageId = null
-      db.exec('BEGIN')
       try {
-        const result = insertMessageStatement.run(
-          messengerConversationId,
-          user.id,
-          messageBody || null,
-          replyToMessageId,
-        )
-        messageId = Number(result.lastInsertRowid)
-
-        if (attachment) {
-          savedFilePath = path.join(uploadsDir, attachment.storagePath)
-          fs.writeFileSync(savedFilePath, attachment.buffer, { flag: 'wx' })
-          insertAttachmentStatement.run(
-            messageId,
-            attachment.originalName,
-            attachment.storedName,
-            attachment.mimeType,
-            attachment.size,
-            attachment.storagePath,
+        messageId = await db.transaction(async (client) => {
+          const result = await insertMessageStatement.runOn(
+            client,
+            messengerConversationId,
+            user.id,
+            messageBody || null,
+            replyToMessageId,
           )
-        }
+          const newMessageId = Number(result.lastInsertRowid)
 
-        updateConversationTimestampStatement.run(messengerConversationId)
-        db.exec('COMMIT')
+          if (attachment) {
+            savedFilePath = path.join(uploadsDir, attachment.storagePath)
+            fs.writeFileSync(savedFilePath, attachment.buffer, { flag: 'wx' })
+            await insertAttachmentStatement.runOn(
+              client,
+              newMessageId,
+              attachment.originalName,
+              attachment.storedName,
+              attachment.mimeType,
+              attachment.size,
+              attachment.storagePath,
+            )
+          }
+
+          await updateConversationTimestampStatement.runOn(client, messengerConversationId)
+          return newMessageId
+        })
       } catch (error) {
-        db.exec('ROLLBACK')
         if (savedFilePath) {
           fs.rmSync(savedFilePath, { force: true })
         }
         throw error
       }
 
-      const messageRow = getMessageByIdStatement.get(messageId)
-      const attachments = listAttachmentsForMessageStatement.all(messageId)
+      const messageRow = await getMessageByIdStatement.get(messageId)
+      const attachments = await listAttachmentsForMessageStatement.all(messageId)
 
       json(res, 201, {
-        conversation: conversationToDto(getConversationByIdStatement.get(messengerConversationId), user),
+        conversation: await conversationToDto(await getConversationByIdStatement.get(messengerConversationId), user),
         message: messageToDto(messageRow, attachments),
       })
       return
@@ -2063,16 +2061,16 @@ const appServer = http.createServer((req, res) => {
 
     const attachmentId = parseAttachmentPath(pathname)
     if (attachmentId && req.method === 'GET') {
-      const user = requireUser(req, res)
+      const user = await requireUser(req, res)
       if (!user) return
 
-      const attachment = getAttachmentByIdStatement.get(attachmentId)
+      const attachment = await getAttachmentByIdStatement.get(attachmentId)
       if (!attachment) {
         notFound(res, 'Файл не найден')
         return
       }
 
-      const conversation = ensureConversationMember(attachment.conversation_id, user, res)
+      const conversation = await ensureConversationMember(attachment.conversation_id, user, res)
       if (!conversation) return
 
       const filePath = path.resolve(uploadsDir, attachment.storage_path)
@@ -2101,10 +2099,10 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/roles/permissions' && req.method === 'GET') {
-      const access = requirePermission(req, res, 'rolesManage')
+      const access = await requirePermission(req, res, 'rolesManage')
       if (!access) return
 
-      const rows = listRolePermissionsStatement.all()
+      const rows = await listRolePermissionsStatement.all()
       const roles = rows.map((row) => ({
         role: row.role,
         permissions: mapPermissionsRow(row),
@@ -2115,10 +2113,10 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/users' && req.method === 'GET') {
-      const access = requirePermission(req, res, 'rolesManage')
+      const access = await requirePermission(req, res, 'rolesManage')
       if (!access) return
 
-      const users = listUsersForRoleManageStatement.all().map((row) => ({
+      const users = (await listUsersForRoleManageStatement.all()).map((row) => ({
         id: row.id,
         email: row.email,
         name: row.name,
@@ -2133,11 +2131,11 @@ const appServer = http.createServer((req, res) => {
 
     const userRoleTargetId = parseUserId(pathname)
     if (userRoleTargetId && req.method === 'PUT') {
-      const access = requirePermission(req, res, 'rolesManage')
+      const access = await requirePermission(req, res, 'rolesManage')
       if (!access) return
       const { user: actorUser } = access
 
-      const targetUser = getUserByIdStatement.get(userRoleTargetId)
+      const targetUser = await getUserByIdStatement.get(userRoleTargetId)
       if (!targetUser) {
         notFound(res, 'Пользователь не найден')
         return
@@ -2172,10 +2170,10 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
-      updateUserRoleStatement.run(nextRole, userRoleTargetId)
-      const updatedUser = getUserByIdStatement.get(userRoleTargetId)
+      await updateUserRoleStatement.run(nextRole, userRoleTargetId)
+      const updatedUser = await getUserByIdStatement.get(userRoleTargetId)
 
-      logAudit({
+      await logAudit({
         actorUser,
         entityType: 'user',
         entityId: userRoleTargetId,
@@ -2198,21 +2196,21 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/roles/permissions' && req.method === 'PUT') {
-      const access = requirePermission(req, res, 'rolesManage')
+      const access = await requirePermission(req, res, 'rolesManage')
       if (!access) return
 
       const body = await readJsonBody(req)
       const roles = Array.isArray(body.roles) ? body.roles : []
       const allowedRoles = new Set(['chef', 'employee'])
 
-      db.exec('BEGIN')
-      try {
+      await db.transaction(async (client) => {
         for (const item of roles) {
           const role = String(item?.role || '')
           if (!allowedRoles.has(role)) continue
           const permissions = item.permissions || {}
 
-          upsertRolePermissionsStatement.run(
+          await upsertRolePermissionsStatement.runOn(
+            client,
             role,
             toBoolInt(permissions.reportEdit),
             toBoolInt(permissions.productsManage),
@@ -2221,13 +2219,9 @@ const appServer = http.createServer((req, res) => {
             toBoolInt(permissions.rolesManage),
           )
         }
-        db.exec('COMMIT')
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
-      }
+      })
 
-      const rows = listRolePermissionsStatement.all()
+      const rows = await listRolePermissionsStatement.all()
       const responseRoles = rows.map((row) => ({
         role: row.role,
         permissions: mapPermissionsRow(row),
@@ -2284,7 +2278,7 @@ const appServer = http.createServer((req, res) => {
 
 appServer.listen(PORT, HOST, () => {
   console.log(`API+Web server started on http://${HOST}:${PORT}`)
-  console.log(`SQLite database: ${dbPath}`)
+  console.log(`PostgreSQL database: ${dbPath}`)
 })
 
 process.on('SIGINT', () => {

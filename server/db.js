@@ -1,23 +1,117 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import pg from 'pg'
 
-const defaultDbPath = path.resolve(process.cwd(), 'data', 'kofeteriy.sqlite')
-const dbPath = process.env.DB_PATH || defaultDbPath
+const { Pool } = pg
 
-fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+const databaseUrl = process.env.DATABASE_URL || ''
 
-const db = new DatabaseSync(dbPath)
+const poolConfig = databaseUrl
+  ? { connectionString: databaseUrl }
+  : {
+      host: process.env.PGHOST || 'localhost',
+      port: Number(process.env.PGPORT || 5432),
+      database: process.env.PGDATABASE || 'kofeteriy',
+      user: process.env.PGUSER || 'kofeteriy',
+      password: process.env.PGPASSWORD || 'kofeteriy',
+    }
 
-// Basic SQLite tuning for small multi-request app.
-db.exec('PRAGMA journal_mode = WAL;')
-db.exec('PRAGMA foreign_keys = ON;')
+export const dbPath = databaseUrl
+  ? databaseUrl.replace(/:\/\/([^:]+):([^@]+)@/, '://$1:***@')
+  : `${poolConfig.user}@${poolConfig.host}:${poolConfig.port}/${poolConfig.database}`
 
-db.exec(`
+const normalizeSql = (sql) => {
+  let index = 0
+  return sql
+    .replace(/datetime\('now'\)/gi, 'CURRENT_TIMESTAMP')
+    .replace(/\?/g, () => `$${++index}`)
+}
+
+class PgStatement {
+  constructor(database, sql) {
+    this.database = database
+    this.sql = normalizeSql(sql)
+  }
+
+  async all(...params) {
+    const result = await this.database.query(this.sql, params)
+    return result.rows
+  }
+
+  async get(...params) {
+    const rows = await this.all(...params)
+    return rows[0]
+  }
+
+  async run(...params) {
+    const result = await this.database.query(this.sql, params)
+    return {
+      changes: result.rowCount,
+      lastInsertRowid: result.rows[0]?.id ?? null,
+    }
+  }
+
+  async allOn(client, ...params) {
+    const result = await client.query(this.sql, params)
+    return result.rows
+  }
+
+  async getOn(client, ...params) {
+    const rows = await this.allOn(client, ...params)
+    return rows[0]
+  }
+
+  async runOn(client, ...params) {
+    const result = await client.query(this.sql, params)
+    return {
+      changes: result.rowCount,
+      lastInsertRowid: result.rows[0]?.id ?? null,
+    }
+  }
+}
+
+class PgDatabase {
+  constructor(config) {
+    this.pool = new Pool(config)
+  }
+
+  prepare(sql) {
+    return new PgStatement(this, sql)
+  }
+
+  async query(sql, params = []) {
+    return this.pool.query(normalizeSql(sql), params)
+  }
+
+  async exec(sql) {
+    return this.pool.query(normalizeSql(sql))
+  }
+
+  async transaction(callback) {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await callback(client)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async close() {
+    await this.pool.end()
+  }
+}
+
+export const db = new PgDatabase(poolConfig)
+
+await db.exec(`
   CREATE TABLE IF NOT EXISTS migrations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 `)
 
@@ -26,19 +120,19 @@ const migrations = [
     name: '001_users_sessions',
     sql: `
       CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         email TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         name TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'employee',
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        expires_at TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
@@ -49,23 +143,23 @@ const migrations = [
     name: '002_products_daily_records',
     sql: `
       CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         category TEXT NOT NULL DEFAULT 'other',
         unit TEXT NOT NULL DEFAULT 'шт',
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS daily_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         record_date TEXT NOT NULL,
         product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-        arrival REAL NOT NULL DEFAULT 0,
-        remainder REAL NOT NULL DEFAULT 0,
-        write_off REAL NOT NULL DEFAULT 0,
+        arrival DOUBLE PRECISION NOT NULL DEFAULT 0,
+        remainder DOUBLE PRECISION NOT NULL DEFAULT 0,
+        write_off DOUBLE PRECISION NOT NULL DEFAULT 0,
         user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(record_date, product_id)
       );
 
@@ -77,7 +171,7 @@ const migrations = [
     name: '003_shifts',
     sql: `
       CREATE TABLE IF NOT EXISTS shifts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         date TEXT NOT NULL,
         start_time TEXT NOT NULL,
         end_time TEXT NOT NULL,
@@ -85,8 +179,8 @@ const migrations = [
         status TEXT NOT NULL DEFAULT 'approved',
         is_paid INTEGER NOT NULL DEFAULT 0,
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date);
@@ -97,16 +191,16 @@ const migrations = [
     name: '004_audit_log',
     sql: `
       CREATE TABLE IF NOT EXISTS audit_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         actor_name TEXT NOT NULL,
         entity_type TEXT NOT NULL,
         entity_id TEXT,
         action TEXT NOT NULL,
-        before_json TEXT,
-        after_json TEXT,
-        context_json TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        before_json JSONB,
+        after_json JSONB,
+        context_json JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
@@ -120,7 +214,7 @@ const migrations = [
         resource TEXT NOT NULL,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         user_name TEXT NOT NULL,
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(resource, user_id)
       );
 
@@ -129,7 +223,7 @@ const migrations = [
 
       CREATE TABLE IF NOT EXISTS resource_state (
         resource TEXT PRIMARY KEY,
-        last_changed_at TEXT,
+        last_changed_at TIMESTAMPTZ,
         last_changed_by TEXT
       );
     `,
@@ -144,10 +238,10 @@ const migrations = [
         schedule_manage INTEGER NOT NULL DEFAULT 0,
         audit_view INTEGER NOT NULL DEFAULT 0,
         roles_manage INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
-      INSERT OR IGNORE INTO role_permissions(
+      INSERT INTO role_permissions(
         role,
         report_edit,
         products_manage,
@@ -158,47 +252,48 @@ const migrations = [
       VALUES
         ('admin', 1, 1, 1, 1, 1),
         ('chef', 1, 0, 0, 0, 0),
-        ('employee', 1, 0, 0, 0, 0);
+        ('employee', 1, 0, 0, 0, 0)
+      ON CONFLICT(role) DO NOTHING;
     `,
   },
   {
     name: '007_messenger',
     sql: `
       CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         type TEXT NOT NULL DEFAULT 'direct',
         title TEXT,
         direct_key TEXT UNIQUE,
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS conversation_members (
         conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        joined_at TEXT NOT NULL DEFAULT (datetime('now')),
-        last_read_at TEXT,
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_read_at TIMESTAMPTZ,
         PRIMARY KEY(conversation_id, user_id)
       );
 
       CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         body TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS message_attachments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
         original_name TEXT NOT NULL,
         stored_name TEXT NOT NULL UNIQUE,
         mime_type TEXT NOT NULL,
         size INTEGER NOT NULL,
         storage_path TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE INDEX IF NOT EXISTS idx_conversations_updated_at
@@ -215,7 +310,7 @@ const migrations = [
     name: '008_message_replies',
     sql: `
       ALTER TABLE messages
-        ADD COLUMN reply_to_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL;
+        ADD COLUMN IF NOT EXISTS reply_to_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL;
 
       CREATE INDEX IF NOT EXISTS idx_messages_reply_to
         ON messages(reply_to_message_id);
@@ -223,21 +318,16 @@ const migrations = [
   },
 ]
 
-const appliedMigrationRows = db.prepare('SELECT name FROM migrations').all()
+const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()
 const appliedMigrations = new Set(appliedMigrationRows.map((row) => row.name))
 
 for (const migration of migrations) {
   if (appliedMigrations.has(migration.name)) continue
 
-  db.exec('BEGIN')
-  try {
-    db.exec(migration.sql)
-    db.prepare('INSERT INTO migrations(name) VALUES (?)').run(migration.name)
-    db.exec('COMMIT')
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
+  await db.transaction(async (client) => {
+    await client.query(migration.sql)
+    await client.query('INSERT INTO migrations(name) VALUES ($1)', [migration.name])
+  })
 }
 
 const defaultProducts = [
@@ -249,21 +339,15 @@ const defaultProducts = [
   { name: 'Слойка с ветчиной', category: 'bakery', unit: 'шт' },
 ]
 
-const productsCount = db.prepare('SELECT COUNT(*) AS count FROM products').get().count
-if (productsCount === 0) {
+const shouldSeedDefaultProducts = process.env.SKIP_DEFAULT_PRODUCTS !== '1'
+const productsCount = await db.prepare('SELECT COUNT(*)::int AS count FROM products').get()
+if (shouldSeedDefaultProducts && productsCount.count === 0) {
   const insertProduct = db.prepare(
     'INSERT INTO products(name, category, unit) VALUES (?, ?, ?)',
   )
-  db.exec('BEGIN')
-  try {
+  await db.transaction(async (client) => {
     for (const product of defaultProducts) {
-      insertProduct.run(product.name, product.category, product.unit)
+      await insertProduct.runOn(client, product.name, product.category, product.unit)
     }
-    db.exec('COMMIT')
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
+  })
 }
-
-export { db, dbPath }

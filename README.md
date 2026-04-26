@@ -1,12 +1,12 @@
 # Кофетерий
 
-Сайт для учёта смены, графика и архива с локальной базой SQLite.
+PWA для учёта смен, графика, архива отчётов и внутреннего мессенджера.
 
 ## Стек
 
 - Frontend: Vue 3 + Vite + Tailwind
 - Backend: Node.js (native `http`)
-- База данных: SQLite (`data/kofeteriy.sqlite`)
+- База данных: PostgreSQL
 
 ## Установка
 
@@ -16,7 +16,18 @@ npm install
 
 ## Запуск в разработке
 
-В двух терминалах:
+Сначала поднимите PostgreSQL. Быстрее всего через Docker:
+
+```bash
+docker run -d --name kofeteriy-postgres \
+  -e POSTGRES_DB=kofeteriy \
+  -e POSTGRES_USER=kofeteriy \
+  -e POSTGRES_PASSWORD=kofeteriy \
+  -p 127.0.0.1:5432:5432 \
+  postgres:16-alpine
+```
+
+Затем запустите backend и frontend в двух терминалах:
 
 ```bash
 npm run dev:api
@@ -31,6 +42,10 @@ Frontend: `http://localhost:5173`
 API: `http://localhost:8787`
 
 Vite проксирует `/api/*` на backend автоматически.
+
+Backend читает подключение из `DATABASE_URL` или переменных `PGHOST`, `PGPORT`,
+`PGDATABASE`, `PGUSER`, `PGPASSWORD`. Локальные значения по умолчанию:
+`kofeteriy/kofeteriy@localhost:5432/kofeteriy`.
 
 ## Первый вход
 
@@ -54,5 +69,18 @@ npm run start
 
 ## Хранилище данных
 
-- БД создаётся автоматически: `data/kofeteriy.sqlite`
-- Миграции и базовые товары применяются автоматически при старте backend.
+- Таблицы PostgreSQL, миграции и базовые товары применяются автоматически при старте backend.
+- Загруженные файлы мессенджера лежат в `data/uploads`.
+- Для Docker Compose используйте `docker compose up -d --build`.
+
+## Перенос со SQLite
+
+Старую SQLite-базу можно перенести в PostgreSQL:
+
+```bash
+DATABASE_URL=postgres://kofeteriy:kofeteriy@localhost:5432/kofeteriy \
+  npm run migrate:postgres -- data/kofeteriy.sqlite
+```
+
+Если нужно полностью заменить данные в целевой PostgreSQL-базе, добавьте
+`--replace`. Используйте это только после резервной копии.

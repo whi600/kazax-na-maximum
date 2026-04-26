@@ -1,17 +1,39 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: kofeteriy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kofeteriy}
+      POSTGRES_USER: ${POSTGRES_USER:-kofeteriy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kofeteriy}
+    volumes:
+      - ${POSTGRES_DATA_DIR:-/opt/kofeteriy/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   app:
     build:
       context: .
     container_name: kofeteriy-app
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 8787
-      DB_PATH: /app/data/kofeteriy.sqlite
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-kofeteriy}
+      PGUSER: ${POSTGRES_USER:-kofeteriy}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-kofeteriy}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     ports:
       - "${APP_PORT:-8787}:8787"
     volumes:
       - ${DATA_DIR:-/opt/kofeteriy/data}:/app/data
-

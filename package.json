@@ -10,11 +10,13 @@
     "build": "node scripts/write-build-version.js && vite build",
     "preview": "vite preview",
     "start": "node server/index.js",
+    "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.js",
     "reset-password": "node scripts/reset-password.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "lucide-vue-next": "^0.563.0",
+    "pg": "^8.20.0",
     "tailwindcss": "^4.1.18",
     "vue": "^3.5.25"
   },
