@@ -92,6 +92,11 @@ export const shiftsApi = {
       method: 'POST',
       body: JSON.stringify({ deletedIds, newShifts }),
     }),
+  update: (id, payload) =>
+    apiRequest(`/api/shifts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   book: (id) => apiRequest(`/api/shifts/${id}/book`, { method: 'PATCH' }),
   unbook: (id) => apiRequest(`/api/shifts/${id}/unbook`, { method: 'PATCH' }),
   approve: (id) => apiRequest(`/api/shifts/${id}/approve`, { method: 'PATCH' }),

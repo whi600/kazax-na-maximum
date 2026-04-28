@@ -236,6 +236,9 @@ const updateShiftEmployeeStatement = db.prepare(
 const updateShiftStatusStatement = db.prepare(
   "UPDATE shifts SET status = ?, updated_at = datetime('now') WHERE id = ?",
 )
+const updateShiftDetailsStatement = db.prepare(
+  "UPDATE shifts SET date = ?, start_time = ?, end_time = ?, updated_at = datetime('now') WHERE id = ?",
+)
 
 const deleteShiftStatement = db.prepare('DELETE FROM shifts WHERE id = ?')
 const upsertEditingPresenceStatement = db.prepare(`
@@ -872,6 +875,8 @@ const normalizeRole = (value) => {
 }
 
 const getToday = () => new Date().toISOString().slice(0, 10)
+const isValidShiftRange = (startTime, endTime) =>
+  Boolean(startTime && endTime && startTime < endTime)
 
 const withErrorHandling = async (res, fn) => {
   try {
@@ -1438,6 +1443,11 @@ const appServer = http.createServer((req, res) => {
         return
       }
 
+      if (!isValidShiftRange(startTime, endTime)) {
+        badRequest(res, 'Время окончания должно быть позже начала')
+        return
+      }
+
       const result = await insertShiftStatement.run(
         date,
         startTime,
@@ -1477,6 +1487,11 @@ const appServer = http.createServer((req, res) => {
 
       if (!date || !startTime || !endTime) {
         badRequest(res, 'Заполните дату и время')
+        return
+      }
+
+      if (!isValidShiftRange(startTime, endTime)) {
+        badRequest(res, 'Время окончания должно быть позже начала')
         return
       }
 
@@ -1532,6 +1547,7 @@ const appServer = http.createServer((req, res) => {
           const startTime = String(shift.start_time || '')
           const endTime = String(shift.end_time || '')
           if (!date || !startTime || !endTime) continue
+          if (!isValidShiftRange(startTime, endTime)) continue
 
           const result = await insertShiftStatement.runOn(
             client,
@@ -1593,6 +1609,42 @@ const appServer = http.createServer((req, res) => {
           action: 'shift.book',
           before: shift,
           after: { ...shift, employee_name: authUser.name },
+        })
+        json(res, 200, { ok: true })
+        return
+      }
+
+      if (req.method === 'PATCH' && !shiftAction.action) {
+        const authPermissions = await getUserPermissions(authUser)
+        if (!authPermissions.scheduleManage) {
+          forbidden(res)
+          return
+        }
+
+        const body = await readJsonBody(req)
+        const date = String(body.date || '')
+        const startTime = String(body.start_time || '')
+        const endTime = String(body.end_time || '')
+
+        if (!date || !startTime || !endTime) {
+          badRequest(res, 'Заполните дату и время')
+          return
+        }
+
+        if (!isValidShiftRange(startTime, endTime)) {
+          badRequest(res, 'Время окончания должно быть позже начала')
+          return
+        }
+
+        await updateShiftDetailsStatement.run(date, startTime, endTime, shiftAction.id)
+        await touchResource('schedule', authUser)
+        await logAudit({
+          actorUser: authUser,
+          entityType: 'shift',
+          entityId: shiftAction.id,
+          action: 'shift.update',
+          before: shift,
+          after: { ...shift, date, start_time: startTime, end_time: endTime },
         })
         json(res, 200, { ok: true })
         return

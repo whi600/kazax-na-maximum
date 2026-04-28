@@ -25,6 +25,7 @@ import {
   Check,
   Bell,
   Plus,
+  Pencil,
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -45,6 +46,7 @@ const shifts = ref([])
 const loading = ref(true)
 const isModalOpen = ref(false)
 const isExtraShift = ref(false)
+const editingShiftId = ref(null)
 const currentUserName = ref('Сотрудник')
 const showPendingSheet = ref(false)
 const showDatePicker = ref(false)
@@ -107,6 +109,23 @@ const structureSaveLabel = computed(() => {
   if (structureSaveStatus.value === 'error') return 'Ошибка сохранения'
   if (structureSaveStatus.value === 'saved') return 'Сохранено'
   return ''
+})
+
+const isEditingShift = computed(() => editingShiftId.value !== null)
+const modalEyebrow = computed(() => {
+  if (isExtraShift.value) return 'Заявка на помощь'
+  if (isEditingShift.value) return 'Редактирование смены'
+  return 'Создание смены'
+})
+const modalTitle = computed(() => {
+  if (isExtraShift.value) return 'Нужна помощь'
+  if (isEditingShift.value) return 'Изменить смену'
+  return 'Новая смена'
+})
+const modalSubmitLabel = computed(() => {
+  if (isExtraShift.value) return 'Отправить заявку'
+  if (isEditingShift.value) return 'Сохранить смену'
+  return 'Добавить в черновик'
 })
 
 const structureSaveClass = computed(() => {
@@ -542,6 +561,7 @@ const cancelBooking = (shift) => {
 
 const openModal = (date = null, isHelp = false) => {
   isExtraShift.value = isHelp
+  editingShiftId.value = null
   form.value = {
     date: date || new Date().toISOString().split('T')[0],
     start_time: '09:00',
@@ -550,8 +570,23 @@ const openModal = (date = null, isHelp = false) => {
   isModalOpen.value = true
 }
 
+const openEditModal = (shift) => {
+  if (!canManageSchedule.value || !shift) return
+
+  isExtraShift.value = false
+  editingShiftId.value = shift.id
+  form.value = {
+    date: shift.date,
+    start_time: shift.start_time,
+    end_time: shift.end_time,
+  }
+  isModalOpen.value = true
+}
+
 const closeModal = () => {
   showDatePicker.value = false
+  editingShiftId.value = null
+  isExtraShift.value = false
   isModalOpen.value = false
 }
 
@@ -569,8 +604,49 @@ const handleSaveModal = async () => {
     return
   }
 
+  if (form.value.end_time <= form.value.start_time) {
+    safeAlert('Время окончания должно быть позже начала')
+    return
+  }
+
   if (isPastDate(form.value.date)) {
     safeAlert('Нельзя добавить смену в прошедшую дату')
+    return
+  }
+
+  if (isEditingShift.value) {
+    const shiftId = editingShiftId.value
+    if (!Number.isFinite(Number(shiftId))) {
+      safeAlert('Не удалось определить смену для редактирования')
+      return
+    }
+
+    if (Number(shiftId) < 0) {
+      unsavedNewShifts.value = unsavedNewShifts.value.map((shift) =>
+        shift.id === shiftId
+          ? {
+              ...shift,
+              date: form.value.date,
+              start_time: form.value.start_time,
+              end_time: form.value.end_time,
+            }
+          : shift,
+      )
+      selectedWeekStart.value = getWeekStart(form.value.date)
+      closeModal()
+      await saveStructure({ silent: true })
+      return
+    }
+
+    try {
+      await shiftsApi.update(shiftId, form.value)
+      await fetchShifts()
+      selectedWeekStart.value = getWeekStart(form.value.date)
+      setStructureSaveStatus('saved')
+      closeModal()
+    } catch (error) {
+      safeAlert(error?.message || 'Не удалось обновить смену')
+    }
     return
   }
 
@@ -691,10 +767,7 @@ watch(
 )
 
 watch(
-  [
-    () => unsavedNewShifts.value.length,
-    () => pendingDeletes.value.size,
-  ],
+  [unsavedNewShifts, () => pendingDeletes.value.size],
   () => {
     if (!canManageSchedule.value) return
     if (suppressStructureAutosave) return
@@ -706,6 +779,7 @@ watch(
       saveStructure({ silent: true })
     }, 600)
   },
+  { deep: true },
 )
 
 onMounted(initialize)
@@ -849,6 +923,15 @@ onBeforeUnmount(() => {
 
                   <button
                     v-if="canManageSchedule"
+                    @click="openEditModal(shift)"
+                    class="text-slate-300 hover:text-blue-600 transition-colors"
+                    aria-label="Редактировать смену"
+                  >
+                    <Pencil class="w-4 h-4" />
+                  </button>
+
+                  <button
+                    v-if="canManageSchedule"
                     @click="markForDeletion(shift)"
                     class="text-slate-200 hover:text-red-500 transition-colors"
                   >
@@ -889,10 +972,10 @@ onBeforeUnmount(() => {
           <div class="flex items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/95 px-4 pb-3 pt-safe">
             <div class="min-w-0">
               <p class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
-                {{ isExtraShift ? 'Заявка на помощь' : 'Создание смены' }}
+                {{ modalEyebrow }}
               </p>
               <h3 class="truncate text-xl font-black uppercase italic tracking-tighter text-slate-900">
-                {{ isExtraShift ? 'Нужна помощь' : 'Новая смена' }}
+                {{ modalTitle }}
               </h3>
             </div>
             <button @click="closeModal" class="rounded-full bg-white p-2 text-slate-400 shadow-sm">
@@ -967,7 +1050,7 @@ onBeforeUnmount(() => {
                 @click="handleSaveModal"
                 class="flex-[1.35] rounded-2xl bg-blue-600 px-4 py-4 text-[11px] font-black uppercase text-white shadow-xl shadow-blue-200 transition-all active:scale-[0.99]"
               >
-                {{ isExtraShift ? 'Отправить заявку' : 'Добавить в черновик' }}
+                {{ modalSubmitLabel }}
               </button>
             </div>
           </div>
