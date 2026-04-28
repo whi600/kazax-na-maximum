@@ -1,8 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { authApi, editingApi, recordsApi } from './api'
+import { authApi, editingApi, notificationsApi, recordsApi } from './api'
 import { buildNavItems, getTabFromLocation, tabRoutes } from './navigation'
 import { defaultPermissionsByRole, permissionRows, roleLabels } from './permissions'
+import {
+  getNotificationPermission,
+  requestPushPermissionAndSubscribe,
+} from './pushNotifications'
 import AdminArchive from './components/AdminArchive.vue'
 import ScheduleView from './components/ScheduleView.vue'
 import AuthView from './components/AuthView.vue'
@@ -19,6 +23,7 @@ import {
 } from 'lucide-vue-next'
 
 const SUPER_ADMIN_EMAIL = 'misakurnikov942@gmail.com'
+const PUSH_PROMPT_KEY_PREFIX = 'kofeteriy:push-prompt'
 
 if (typeof window !== 'undefined') {
   const standalone =
@@ -119,6 +124,28 @@ const navigateTo = (tab, replace = false) => {
   if (nextTab !== 'messenger') messengerChatOpen.value = false
   if (nextTab !== 'profile') profileView.value = 'main'
   updateRoute(nextTab, replace)
+}
+
+const buildPushPromptKey = (userId) => `${PUSH_PROMPT_KEY_PREFIX}:${userId}`
+
+const maybeAskForPushPermission = async (user) => {
+  if (typeof window === 'undefined' || !user?.id) return
+
+  const permission = getNotificationPermission()
+  if (permission === 'unsupported' || permission === 'denied' || permission === 'granted') {
+    return
+  }
+
+  const promptKey = buildPushPromptKey(user.id)
+  if (window.localStorage.getItem(promptKey) === '1') return
+
+  window.localStorage.setItem(promptKey, '1')
+
+  try {
+    await requestPushPermissionAndSubscribe(notificationsApi)
+  } catch {
+    // noop
+  }
 }
 
 const handlePopState = () => {
@@ -309,6 +336,7 @@ const initialize = async () => {
     if (currentUser.value) {
       await loadPermissions()
       await fetchAppData()
+      await maybeAskForPushPermission(currentUser.value)
     }
   } catch {
     currentUser.value = null
@@ -494,6 +522,7 @@ const handleSignIn = async ({ email, password }) => {
     await loadPermissions()
     navigateTo(getTabFromLocation(), true)
     await fetchAppData()
+    await maybeAskForPushPermission(currentUser.value)
   } catch (error) {
     authMessage.value = error?.message || 'Не удалось войти'
   } finally {
@@ -511,6 +540,7 @@ const handleSignUp = async ({ email, password, displayName }) => {
     await loadPermissions()
     navigateTo(getTabFromLocation(), true)
     await fetchAppData()
+    await maybeAskForPushPermission(currentUser.value)
   } catch (error) {
     authMessage.value = error?.message || 'Не удалось зарегистрироваться'
   } finally {
