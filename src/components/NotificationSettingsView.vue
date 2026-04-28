@@ -4,6 +4,7 @@ import { notificationsApi } from '../api'
 import {
   getCurrentPushSubscription,
   getNotificationPermission,
+  isStandalonePwa,
   requestPushPermissionAndSubscribe,
   syncPushSubscription,
   unsubscribePushSubscription,
@@ -25,6 +26,7 @@ const actionBusy = ref(false)
 const testBusy = ref(false)
 const error = ref('')
 const pushAvailable = ref(false)
+const standalonePwa = ref(false)
 const permission = ref(getNotificationPermission())
 const subscribed = ref(false)
 const settings = ref({
@@ -35,6 +37,7 @@ const settings = ref({
 })
 
 const statusLabel = computed(() => {
+  if (!standalonePwa.value) return 'Уведомления доступны только в установленном приложении'
   if (permission.value === 'unsupported') return 'Это устройство не поддерживает push'
   if (permission.value === 'denied') return 'Уведомления запрещены в браузере'
   if (!pushAvailable.value) return 'Push недоступен на сервере'
@@ -45,6 +48,9 @@ const statusLabel = computed(() => {
 })
 
 const statusClass = computed(() => {
+  if (!standalonePwa.value) {
+    return 'bg-slate-100 border-slate-200 text-slate-500'
+  }
   if (permission.value === 'denied' || permission.value === 'unsupported') {
     return 'bg-red-50 border-red-100 text-red-600'
   }
@@ -73,6 +79,7 @@ const loadSettings = async () => {
   error.value = ''
 
   try {
+    standalonePwa.value = isStandalonePwa()
     permission.value = getNotificationPermission()
     const response = await notificationsApi.settings()
     pushAvailable.value = Boolean(response.pushAvailable)
@@ -83,7 +90,9 @@ const loadSettings = async () => {
       reminders_enabled: Boolean(response.settings?.reminders_enabled),
     }
 
-    if (permission.value === 'granted') {
+    if (!standalonePwa.value) {
+      subscribed.value = false
+    } else if (permission.value === 'granted') {
       const syncResult = await syncPushSubscription(notificationsApi).catch(() => null)
       if (syncResult) {
         subscribed.value = Boolean(syncResult.subscribed)
@@ -214,6 +223,10 @@ onMounted(loadSettings)
 
         <div v-if="error" class="rounded-lg border border-red-100 bg-red-50 px-3 py-3 text-[11px] font-black text-red-600">
           {{ error }}
+        </div>
+
+        <div v-if="!standalonePwa" class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-[11px] font-bold text-slate-500">
+          Открой установленную PWA-версию приложения, и только там подключай push-уведомления.
         </div>
 
         <div class="grid gap-2">

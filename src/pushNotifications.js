@@ -5,8 +5,18 @@ const urlBase64ToUint8Array = (value) => {
   return Uint8Array.from(rawData, (char) => char.charCodeAt(0))
 }
 
+export const isStandalonePwa = () => {
+  if (typeof window === 'undefined') return false
+  return (
+    window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.matchMedia?.('(display-mode: fullscreen)')?.matches ||
+    window.navigator?.standalone === true
+  )
+}
+
 export const getNotificationPermission = () => {
   if (typeof window === 'undefined') return 'unsupported'
+  if (!isStandalonePwa()) return 'unsupported'
   if (!('Notification' in window) || !('serviceWorker' in navigator)) {
     return 'unsupported'
   }
