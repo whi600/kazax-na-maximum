@@ -1,18 +1,122 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
+import {
+  clearSessionCookie,
+  createSession,
+  getCurrentUser,
+  getUserPermissions,
+  hashPassword,
+  isSuperAdminEmail,
+  isSuperAdminUser,
+  mapPermissionsRow,
+  normalizeRole,
+  requirePermission,
+  requireUser,
+  sanitizeUser,
+  setSessionCookie,
+  SUPER_ADMIN_EMAIL,
+  toBoolInt,
+  verifyPassword,
+} from './auth.js'
 import { db, dbPath } from './db.js'
-import { pushConfig, sendPushNotification } from './push.js'
+import { logAudit, parseAuditJson, touchResource } from './audit.js'
+import {
+  badRequest,
+  forbidden,
+  json,
+  noContent,
+  notFound,
+  readJsonBody as readJsonRequestBody,
+  withErrorHandling,
+} from './http.js'
+import {
+  parseMultipartBody as parseMultipartRequestBody,
+  prepareAttachmentUpload as prepareAttachmentUploadFile,
+  sanitizeUploadName,
+} from './uploads.js'
+import { createStaticFileServer } from './static.js'
+import {
+  buildPushPayload,
+  ensureNotificationSettings,
+  notifyUserByName,
+  notifyUsers,
+  pushConfig,
+  startReminderLoop,
+  stopReminderLoop,
+} from './notifications.js'
+import {
+  buildMessagePreview,
+  conversationToDto,
+  ensureConversationMember,
+  listMessageDtos,
+  makeDirectConversationKey,
+  mapMessengerUser,
+  messageToDto,
+  normalizeGroupTitle,
+  normalizeMemberIds,
+  normalizePersonName,
+} from './messenger.js'
+import {
+  getUsersCountStatement,
+  getUserByEmailStatement,
+  getUserByIdStatement,
+  listUsersForRoleManageStatement,
+  listUsersWithScheduleManageStatement,
+  updateUserRoleStatement,
+  createUserStatement,
+  createSessionStatement,
+  getSessionUserStatement,
+  deleteSessionStatement,
+  deleteExpiredSessionsStatement,
+  listProductsStatement,
+  getProductByIdStatement,
+  insertProductStatement,
+  updateProductStatement,
+  deleteProductStatement,
+  getRolePermissionsStatement,
+  listRolePermissionsStatement,
+  upsertRolePermissionsStatement,
+  listTodayRecordsStatement,
+  deleteTodayRecordsStatement,
+  insertDailyRecordStatement,
+  listArchiveRecordsStatement,
+  listUpcomingShiftsStatement,
+  listAllShiftsStatement,
+  getShiftByIdStatement,
+  insertShiftStatement,
+  updateShiftEmployeeStatement,
+  updateShiftStatusStatement,
+  updateShiftDetailsStatement,
+  upsertNotificationSettingsStatement,
+  upsertPushSubscriptionStatement,
+  deletePushSubscriptionStatement,
+  deleteShiftStatement,
+  upsertEditingPresenceStatement,
+  removeEditingPresenceStatement,
+  listEditingPresenceStatement,
+  getResourceStateStatement,
+  listAuditLogStatement,
+  listUsersForMessengerStatement,
+  getConversationByDirectKeyStatement,
+  getConversationByIdStatement,
+  createConversationStatement,
+  addConversationMemberStatement,
+  listUserConversationsStatement,
+  listConversationMembersStatement,
+  getMessageByIdStatement,
+  listAttachmentsForMessageStatement,
+  insertMessageStatement,
+  insertAttachmentStatement,
+  updateConversationTimestampStatement,
+  getAttachmentByIdStatement,
+} from './statements.js'
 
 const HOST = process.env.HOST || '0.0.0.0'
 const PORT = Number(process.env.PORT || 8787)
-const SESSION_COOKIE = 'kof_session'
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30
 const MAX_BODY_SIZE = 1024 * 1024
 const MAX_UPLOAD_BODY_SIZE = 12 * 1024 * 1024
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
-const SUPER_ADMIN_EMAIL = 'misakurnikov942@gmail.com'
 const uploadsDir = path.resolve(process.cwd(), 'data', 'uploads')
 fs.mkdirSync(uploadsDir, { recursive: true })
 
@@ -23,579 +127,8 @@ const adminEmails = new Set(
     .filter(Boolean),
 )
 
-const mimeTypes = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-  '.webmanifest': 'application/manifest+json; charset=utf-8',
-}
-const allowedAttachmentMimeTypes = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'application/pdf',
-  'text/plain',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-])
-const allowedAttachmentExtensions = new Set([
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.gif',
-  '.pdf',
-  '.txt',
-  '.doc',
-  '.docx',
-  '.xls',
-  '.xlsx',
-])
-
 const distDir = path.resolve(process.cwd(), 'dist')
-const hasDist = fs.existsSync(distDir)
-
-const getUsersCountStatement = db.prepare('SELECT COUNT(*)::int AS count FROM users')
-const getUserByEmailStatement = db.prepare('SELECT * FROM users WHERE email = ?')
-const getUserByIdStatement = db.prepare(
-  'SELECT id, email, name, role, created_at FROM users WHERE id = ?',
-)
-const getUserByNameStatement = db.prepare(`
-  SELECT id, email, name, role, created_at
-  FROM users
-  WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
-  ORDER BY created_at DESC, id DESC
-  LIMIT 1
-`)
-const listUsersForRoleManageStatement = db.prepare(`
-  SELECT id, email, name, role, created_at
-  FROM users
-  ORDER BY created_at DESC, id DESC
-`)
-const listUsersWithScheduleManageStatement = db.prepare(`
-  SELECT u.id, u.email, u.name, u.role, u.created_at
-  FROM users u
-  JOIN role_permissions rp ON rp.role = u.role
-  WHERE rp.schedule_manage = 1
-  ORDER BY u.created_at DESC, u.id DESC
-`)
-const updateUserRoleStatement = db.prepare(
-  "UPDATE users SET role = ? WHERE id = ?",
-)
-const createUserStatement = db.prepare(
-  'INSERT INTO users(email, password_hash, name, role) VALUES (?, ?, ?, ?) RETURNING id',
-)
-const createSessionStatement = db.prepare(
-  'INSERT INTO sessions(id, user_id, expires_at) VALUES (?, ?, ?)',
-)
-const getSessionUserStatement = db.prepare(`
-  SELECT
-    s.id AS session_id,
-    s.expires_at AS expires_at,
-    u.id AS id,
-    u.email AS email,
-    u.name AS name,
-    u.role AS role,
-    u.created_at AS created_at
-  FROM sessions s
-  JOIN users u ON u.id = s.user_id
-  WHERE s.id = ?
-`)
-const deleteSessionStatement = db.prepare('DELETE FROM sessions WHERE id = ?')
-const deleteExpiredSessionsStatement = db.prepare(
-  "DELETE FROM sessions WHERE expires_at <= datetime('now')",
-)
-
-const listProductsStatement = db.prepare(
-  'SELECT id, name, category, unit FROM products ORDER BY name',
-)
-const getProductByIdStatement = db.prepare(
-  'SELECT id, name, category, unit FROM products WHERE id = ?',
-)
-const insertProductStatement = db.prepare(
-  "INSERT INTO products(name, category, unit) VALUES (?, ?, ?) RETURNING id",
-)
-const updateProductStatement = db.prepare(
-  "UPDATE products SET name = ?, category = ?, unit = ? WHERE id = ?",
-)
-const deleteProductStatement = db.prepare('DELETE FROM products WHERE id = ?')
-const getRolePermissionsStatement = db.prepare(`
-  SELECT
-    role,
-    report_edit,
-    products_manage,
-    schedule_manage,
-    audit_view,
-    roles_manage
-  FROM role_permissions
-  WHERE role = ?
-`)
-const listRolePermissionsStatement = db.prepare(`
-  SELECT
-    role,
-    report_edit,
-    products_manage,
-    schedule_manage,
-    audit_view,
-    roles_manage
-  FROM role_permissions
-  ORDER BY role
-`)
-const upsertRolePermissionsStatement = db.prepare(`
-  INSERT INTO role_permissions(
-    role,
-    report_edit,
-    products_manage,
-    schedule_manage,
-    audit_view,
-    roles_manage,
-    updated_at
-  )
-  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-  ON CONFLICT(role)
-  DO UPDATE SET
-    report_edit = excluded.report_edit,
-    products_manage = excluded.products_manage,
-    schedule_manage = excluded.schedule_manage,
-    audit_view = excluded.audit_view,
-    roles_manage = excluded.roles_manage,
-    updated_at = datetime('now')
-`)
-
-const listTodayRecordsStatement = db.prepare(`
-  SELECT
-    dr.product_id,
-    dr.arrival,
-    dr.remainder,
-    dr.write_off,
-    p.name,
-    p.category,
-    p.unit
-  FROM daily_records dr
-  JOIN products p ON p.id = dr.product_id
-  WHERE dr.record_date = ?
-  ORDER BY p.name
-`)
-
-const deleteTodayRecordsStatement = db.prepare(
-  'DELETE FROM daily_records WHERE record_date = ?',
-)
-
-const insertDailyRecordStatement = db.prepare(`
-  INSERT INTO daily_records(record_date, product_id, arrival, remainder, write_off, user_id, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-`)
-
-const listArchiveRecordsStatement = db.prepare(`
-  SELECT
-    dr.id,
-    dr.record_date,
-    dr.product_id,
-    dr.arrival,
-    dr.remainder,
-    dr.write_off,
-    p.name AS product_name
-  FROM daily_records dr
-  JOIN products p ON p.id = dr.product_id
-  ORDER BY dr.record_date DESC, p.name ASC
-`)
-
-const listUpcomingShiftsStatement = db.prepare(`
-  SELECT
-    id,
-    date,
-    start_time,
-    end_time,
-    employee_name,
-    status
-  FROM shifts
-  WHERE date >= ?
-  ORDER BY date ASC, start_time ASC
-`)
-
-const listAllShiftsStatement = db.prepare(`
-  SELECT
-    id,
-    date,
-    start_time,
-    end_time,
-    employee_name,
-    status
-  FROM shifts
-  ORDER BY date DESC, start_time DESC
-`)
-const listReminderShiftsStatement = db.prepare(`
-  SELECT id, date, start_time, end_time, employee_name
-  FROM shifts
-  WHERE status = 'approved'
-    AND employee_name IS NOT NULL
-    AND date >= ?
-  ORDER BY date ASC, start_time ASC
-`)
-
-const getShiftByIdStatement = db.prepare(
-  'SELECT id, date, start_time, end_time, employee_name, status, created_by FROM shifts WHERE id = ?',
-)
-
-const insertShiftStatement = db.prepare(`
-  INSERT INTO shifts(date, start_time, end_time, employee_name, status, created_by, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-  RETURNING id
-`)
-
-const updateShiftEmployeeStatement = db.prepare(
-  "UPDATE shifts SET employee_name = ?, updated_at = datetime('now') WHERE id = ?",
-)
-
-const updateShiftStatusStatement = db.prepare(
-  "UPDATE shifts SET status = ?, updated_at = datetime('now') WHERE id = ?",
-)
-const updateShiftDetailsStatement = db.prepare(
-  "UPDATE shifts SET date = ?, start_time = ?, end_time = ?, updated_at = datetime('now') WHERE id = ?",
-)
-const getNotificationSettingsStatement = db.prepare(`
-  SELECT
-    user_id,
-    push_enabled,
-    messages_enabled,
-    shifts_enabled,
-    reminders_enabled,
-    updated_at
-  FROM notification_settings
-  WHERE user_id = ?
-`)
-const upsertNotificationSettingsStatement = db.prepare(`
-  INSERT INTO notification_settings(
-    user_id,
-    push_enabled,
-    messages_enabled,
-    shifts_enabled,
-    reminders_enabled,
-    updated_at
-  )
-  VALUES (?, ?, ?, ?, ?, datetime('now'))
-  ON CONFLICT(user_id)
-  DO UPDATE SET
-    push_enabled = excluded.push_enabled,
-    messages_enabled = excluded.messages_enabled,
-    shifts_enabled = excluded.shifts_enabled,
-    reminders_enabled = excluded.reminders_enabled,
-    updated_at = datetime('now')
-`)
-const upsertPushSubscriptionStatement = db.prepare(`
-  INSERT INTO push_subscriptions(
-    user_id,
-    endpoint,
-    p256dh_key,
-    auth_key,
-    user_agent,
-    updated_at,
-    disabled_at,
-    last_error_at
-  )
-  VALUES (?, ?, ?, ?, ?, datetime('now'), NULL, NULL)
-  ON CONFLICT(endpoint)
-  DO UPDATE SET
-    user_id = excluded.user_id,
-    p256dh_key = excluded.p256dh_key,
-    auth_key = excluded.auth_key,
-    user_agent = excluded.user_agent,
-    updated_at = datetime('now'),
-    disabled_at = NULL,
-    last_error_at = NULL
-`)
-const deletePushSubscriptionStatement = db.prepare(
-  'DELETE FROM push_subscriptions WHERE endpoint = ?',
-)
-const listPushSubscriptionsByUserIdsStatement = db.prepare(`
-  SELECT
-    ps.id,
-    ps.user_id,
-    ps.endpoint,
-    ps.p256dh_key,
-    ps.auth_key,
-    ps.user_agent,
-    ps.created_at,
-    ps.updated_at,
-    ps.last_success_at,
-    ps.last_error_at,
-    ps.disabled_at
-  FROM push_subscriptions ps
-  WHERE ps.user_id = ANY(?::int[])
-    AND ps.disabled_at IS NULL
-`)
-const markPushSubscriptionSuccessStatement = db.prepare(
-  "UPDATE push_subscriptions SET last_success_at = datetime('now'), last_error_at = NULL, updated_at = datetime('now') WHERE endpoint = ?",
-)
-const markPushSubscriptionErrorStatement = db.prepare(
-  "UPDATE push_subscriptions SET last_error_at = datetime('now'), updated_at = datetime('now') WHERE endpoint = ?",
-)
-const disablePushSubscriptionStatement = db.prepare(
-  "UPDATE push_subscriptions SET disabled_at = datetime('now'), last_error_at = datetime('now'), updated_at = datetime('now') WHERE endpoint = ?",
-)
-const getNotificationMarkStatement = db.prepare(
-  'SELECT dedupe_key, user_id, kind, created_at FROM notification_marks WHERE dedupe_key = ?',
-)
-const insertNotificationMarkStatement = db.prepare(
-  'INSERT INTO notification_marks(dedupe_key, user_id, kind) VALUES (?, ?, ?)',
-)
-
-const deleteShiftStatement = db.prepare('DELETE FROM shifts WHERE id = ?')
-const upsertEditingPresenceStatement = db.prepare(`
-  INSERT INTO editing_presence(resource, user_id, user_name, updated_at)
-  VALUES (?, ?, ?, datetime('now'))
-  ON CONFLICT(resource, user_id)
-  DO UPDATE SET
-    user_name = excluded.user_name,
-    updated_at = datetime('now')
-`)
-const removeEditingPresenceStatement = db.prepare(
-  'DELETE FROM editing_presence WHERE resource = ? AND user_id = ?',
-)
-const listEditingPresenceStatement = db.prepare(`
-  SELECT resource, user_id, user_name, updated_at
-  FROM editing_presence
-  WHERE resource = ?
-    AND updated_at >= CURRENT_TIMESTAMP - INTERVAL '35 seconds'
-  ORDER BY updated_at DESC
-`)
-const upsertResourceStateStatement = db.prepare(`
-  INSERT INTO resource_state(resource, last_changed_at, last_changed_by)
-  VALUES (?, datetime('now'), ?)
-  ON CONFLICT(resource)
-  DO UPDATE SET
-    last_changed_at = datetime('now'),
-    last_changed_by = excluded.last_changed_by
-`)
-const getResourceStateStatement = db.prepare(
-  'SELECT resource, last_changed_at, last_changed_by FROM resource_state WHERE resource = ?',
-)
-const insertAuditLogStatement = db.prepare(`
-  INSERT INTO audit_log(
-    actor_user_id,
-    actor_name,
-    entity_type,
-    entity_id,
-    action,
-    before_json,
-    after_json,
-    context_json,
-    created_at
-  )
-  VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, datetime('now'))
-`)
-const listAuditLogStatement = db.prepare(`
-  SELECT
-    id,
-    actor_user_id,
-    actor_name,
-    entity_type,
-    entity_id,
-    action,
-    before_json,
-    after_json,
-    context_json,
-    created_at
-  FROM audit_log
-  ORDER BY created_at DESC, id DESC
-  LIMIT ?
-  OFFSET ?
-`)
-const listUsersForMessengerStatement = db.prepare(`
-  SELECT id, email, name, role, created_at
-  FROM users
-  ORDER BY LOWER(name) ASC, email ASC
-`)
-const getConversationByDirectKeyStatement = db.prepare(
-  'SELECT id, type, title, direct_key, created_by, created_at, updated_at FROM conversations WHERE direct_key = ?',
-)
-const getConversationByIdStatement = db.prepare(
-  'SELECT id, type, title, direct_key, created_by, created_at, updated_at FROM conversations WHERE id = ?',
-)
-const createConversationStatement = db.prepare(`
-  INSERT INTO conversations(type, title, direct_key, created_by, updated_at)
-  VALUES (?, ?, ?, ?, datetime('now'))
-  RETURNING id
-`)
-const addConversationMemberStatement = db.prepare(`
-  INSERT INTO conversation_members(conversation_id, user_id)
-  VALUES (?, ?)
-  ON CONFLICT(conversation_id, user_id) DO NOTHING
-`)
-const isConversationMemberStatement = db.prepare(`
-  SELECT 1 AS ok
-  FROM conversation_members
-  WHERE conversation_id = ? AND user_id = ?
-`)
-const listUserConversationsStatement = db.prepare(`
-  SELECT
-    c.id,
-    c.type,
-    c.title,
-    c.direct_key,
-    c.created_at,
-    c.updated_at,
-    lm.id AS last_message_id,
-    lm.body AS last_message_body,
-    lm.created_at AS last_message_created_at,
-    sender.id AS last_sender_id,
-    sender.name AS last_sender_name
-  FROM conversations c
-  JOIN conversation_members cm ON cm.conversation_id = c.id
-  LEFT JOIN messages lm ON lm.id = (
-    SELECT m.id
-    FROM messages m
-    WHERE m.conversation_id = c.id
-    ORDER BY m.created_at DESC, m.id DESC
-    LIMIT 1
-  )
-  LEFT JOIN users sender ON sender.id = lm.sender_user_id
-  WHERE cm.user_id = ?
-  ORDER BY c.updated_at DESC, c.id DESC
-`)
-const listConversationMembersStatement = db.prepare(`
-  SELECT u.id, u.email, u.name, u.role
-  FROM conversation_members cm
-  JOIN users u ON u.id = cm.user_id
-  WHERE cm.conversation_id = ?
-  ORDER BY LOWER(u.name) ASC
-`)
-const listMessagesStatement = db.prepare(`
-  SELECT
-    m.id,
-    m.conversation_id,
-    m.sender_user_id,
-    m.body,
-    m.reply_to_message_id,
-    m.created_at,
-    u.name AS sender_name,
-    u.email AS sender_email,
-    rm.body AS reply_body,
-    rm.sender_user_id AS reply_sender_user_id,
-    ru.name AS reply_sender_name,
-    ru.email AS reply_sender_email,
-    (
-      SELECT COUNT(*)
-      FROM message_attachments rma
-      WHERE rma.message_id = rm.id
-    ) AS reply_attachment_count
-  FROM messages m
-  LEFT JOIN users u ON u.id = m.sender_user_id
-  LEFT JOIN messages rm ON rm.id = m.reply_to_message_id
-  LEFT JOIN users ru ON ru.id = rm.sender_user_id
-  WHERE m.conversation_id = ?
-    AND m.id IN (
-      SELECT id
-      FROM messages
-      WHERE conversation_id = ?
-      ORDER BY created_at DESC, id DESC
-      LIMIT ?
-    )
-  ORDER BY m.created_at ASC, m.id ASC
-`)
-const getMessageByIdStatement = db.prepare(`
-  SELECT
-    m.id,
-    m.conversation_id,
-    m.sender_user_id,
-    m.body,
-    m.reply_to_message_id,
-    m.created_at,
-    u.name AS sender_name,
-    u.email AS sender_email,
-    rm.body AS reply_body,
-    rm.sender_user_id AS reply_sender_user_id,
-    ru.name AS reply_sender_name,
-    ru.email AS reply_sender_email,
-    (
-      SELECT COUNT(*)
-      FROM message_attachments rma
-      WHERE rma.message_id = rm.id
-    ) AS reply_attachment_count
-  FROM messages m
-  LEFT JOIN users u ON u.id = m.sender_user_id
-  LEFT JOIN messages rm ON rm.id = m.reply_to_message_id
-  LEFT JOIN users ru ON ru.id = rm.sender_user_id
-  WHERE m.id = ?
-`)
-const listAttachmentsForConversationStatement = db.prepare(`
-  SELECT
-    ma.id,
-    ma.message_id,
-    ma.original_name,
-    ma.stored_name,
-    ma.mime_type,
-    ma.size,
-    ma.created_at
-  FROM message_attachments ma
-  JOIN messages m ON m.id = ma.message_id
-  WHERE m.conversation_id = ?
-`)
-const listAttachmentsForMessageStatement = db.prepare(`
-  SELECT
-    id,
-    message_id,
-    original_name,
-    stored_name,
-    mime_type,
-    size,
-    created_at
-  FROM message_attachments
-  WHERE message_id = ?
-`)
-const insertMessageStatement = db.prepare(`
-  INSERT INTO messages(conversation_id, sender_user_id, body, reply_to_message_id)
-  VALUES (?, ?, ?, ?)
-  RETURNING id
-`)
-const insertAttachmentStatement = db.prepare(`
-  INSERT INTO message_attachments(
-    message_id,
-    original_name,
-    stored_name,
-    mime_type,
-    size,
-    storage_path
-  )
-  VALUES (?, ?, ?, ?, ?, ?)
-`)
-const updateConversationTimestampStatement = db.prepare(
-  "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?",
-)
-const getAttachmentByIdStatement = db.prepare(`
-  SELECT
-    ma.id,
-    ma.message_id,
-    ma.original_name,
-    ma.stored_name,
-    ma.mime_type,
-    ma.size,
-    ma.storage_path,
-    m.conversation_id
-  FROM message_attachments ma
-  JOIN messages m ON m.id = ma.message_id
-  WHERE ma.id = ?
-`)
-
-const sanitizeUser = (row) => {
-  if (!row) return null
-  return {
-    id: row.id,
-    email: row.email,
-    name: row.name,
-    role: row.role,
-    created_at: row.created_at,
-  }
-}
+const serveStaticFile = createStaticFileServer({ distDir, json })
 
 const toShiftDto = (row) => ({
   id: row.id,
@@ -605,383 +138,6 @@ const toShiftDto = (row) => ({
   employee_name: row.employee_name,
   status: row.status || 'approved',
 })
-
-const json = (res, statusCode, payload) => {
-  const body = JSON.stringify(payload)
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Cache-Control': 'no-store',
-  })
-  res.end(body)
-}
-
-const noContent = (res) => {
-  res.writeHead(204)
-  res.end()
-}
-
-const badRequest = (res, message) => json(res, 400, { error: message })
-const unauthorized = (res, message = 'Требуется авторизация') =>
-  json(res, 401, { error: message })
-const forbidden = (res, message = 'Недостаточно прав') =>
-  json(res, 403, { error: message })
-const notFound = (res, message = 'Не найдено') => json(res, 404, { error: message })
-
-const parseCookies = (req) => {
-  const raw = req.headers.cookie
-  if (!raw) return {}
-
-  return raw.split(';').reduce((acc, entry) => {
-    const [key, ...rest] = entry.trim().split('=')
-    if (!key) return acc
-    acc[key] = decodeURIComponent(rest.join('='))
-    return acc
-  }, {})
-}
-
-const setSessionCookie = (res, sessionId) => {
-  const parts = [
-    `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}`,
-    'Path=/',
-    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
-    'HttpOnly',
-    'SameSite=Lax',
-  ]
-
-  // Browsers accept Secure only on HTTPS; keep local development usable.
-  if (process.env.NODE_ENV === 'production') {
-    parts.push('Secure')
-  }
-
-  res.setHeader('Set-Cookie', parts.join('; '))
-}
-
-const clearSessionCookie = (res) => {
-  const parts = [
-    `${SESSION_COOKIE}=`,
-    'Path=/',
-    'Max-Age=0',
-    'HttpOnly',
-    'SameSite=Lax',
-  ]
-  if (process.env.NODE_ENV === 'production') {
-    parts.push('Secure')
-  }
-  res.setHeader('Set-Cookie', parts.join('; '))
-}
-
-const readJsonBody = (req) =>
-  new Promise((resolve, reject) => {
-    let total = 0
-    let raw = ''
-
-    req.on('data', (chunk) => {
-      total += chunk.length
-      if (total > MAX_BODY_SIZE) {
-        reject(new Error('Request body too large'))
-        req.destroy()
-        return
-      }
-      raw += chunk
-    })
-
-    req.on('end', () => {
-      if (!raw) {
-        resolve({})
-        return
-      }
-
-      try {
-        resolve(JSON.parse(raw))
-      } catch {
-        reject(new Error('Invalid JSON'))
-      }
-    })
-
-    req.on('error', reject)
-  })
-
-const readBufferBody = (req, maxSize = MAX_UPLOAD_BODY_SIZE) =>
-  new Promise((resolve, reject) => {
-    let total = 0
-    const chunks = []
-
-    req.on('data', (chunk) => {
-      total += chunk.length
-      if (total > maxSize) {
-        reject(new Error('Request body too large'))
-        req.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-
-    req.on('end', () => {
-      resolve(Buffer.concat(chunks))
-    })
-
-    req.on('error', reject)
-  })
-
-const parseContentDisposition = (value) => {
-  const result = {}
-  String(value || '')
-    .split(';')
-    .map((part) => part.trim())
-    .forEach((part) => {
-      const [key, ...rest] = part.split('=')
-      if (!key || rest.length === 0) return
-      result[key.toLowerCase()] = rest.join('=').replace(/^"|"$/g, '')
-    })
-  return result
-}
-
-const parseMultipartBody = async (req) => {
-  const contentType = String(req.headers['content-type'] || '')
-  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
-  const boundary = boundaryMatch?.[1] || boundaryMatch?.[2]
-  if (!boundary) throw new Error('Missing multipart boundary')
-
-  const body = await readBufferBody(req)
-  const boundaryBuffer = Buffer.from(`--${boundary}`)
-  const fieldMap = {}
-  const files = []
-  let cursor = body.indexOf(boundaryBuffer)
-
-  while (cursor >= 0) {
-    cursor += boundaryBuffer.length
-    const marker = body.subarray(cursor, cursor + 2).toString('utf8')
-    if (marker === '--') break
-    if (marker === '\r\n') cursor += 2
-
-    const headerEnd = body.indexOf(Buffer.from('\r\n\r\n'), cursor)
-    if (headerEnd < 0) break
-
-    const rawHeaders = body.subarray(cursor, headerEnd).toString('utf8')
-    const headers = rawHeaders.split('\r\n').reduce((acc, line) => {
-      const separator = line.indexOf(':')
-      if (separator < 0) return acc
-      acc[line.slice(0, separator).trim().toLowerCase()] = line
-        .slice(separator + 1)
-        .trim()
-      return acc
-    }, {})
-
-    const nextBoundary = body.indexOf(boundaryBuffer, headerEnd + 4)
-    if (nextBoundary < 0) break
-
-    let content = body.subarray(headerEnd + 4, nextBoundary)
-    if (content.length >= 2 && content.subarray(content.length - 2).toString('utf8') === '\r\n') {
-      content = content.subarray(0, content.length - 2)
-    }
-
-    const disposition = parseContentDisposition(headers['content-disposition'])
-    if (disposition.filename) {
-      files.push({
-        fieldName: disposition.name || 'attachment',
-        originalName: disposition.filename,
-        mimeType: headers['content-type'] || 'application/octet-stream',
-        buffer: content,
-      })
-    } else if (disposition.name) {
-      fieldMap[disposition.name] = content.toString('utf8')
-    }
-
-    cursor = nextBoundary
-  }
-
-  return { fields: fieldMap, files }
-}
-
-const sanitizeUploadName = (value) => {
-  const fallback = 'file'
-  return (
-    path
-      .basename(String(value || fallback))
-      .replace(/[^\w.\-а-яА-ЯёЁ ]/g, '_')
-      .trim() || fallback
-  )
-}
-
-const extensionForMimeType = (mimeType) => {
-  if (mimeType === 'image/jpeg') return '.jpg'
-  if (mimeType === 'image/png') return '.png'
-  if (mimeType === 'image/webp') return '.webp'
-  if (mimeType === 'image/gif') return '.gif'
-  if (mimeType === 'application/pdf') return '.pdf'
-  if (mimeType === 'text/plain') return '.txt'
-  if (mimeType.includes('wordprocessingml')) return '.docx'
-  if (mimeType.includes('spreadsheetml')) return '.xlsx'
-  if (mimeType === 'application/msword') return '.doc'
-  if (mimeType === 'application/vnd.ms-excel') return '.xls'
-  return ''
-}
-
-const mimeTypeForExtension = (extension) => {
-  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
-  if (extension === '.png') return 'image/png'
-  if (extension === '.webp') return 'image/webp'
-  if (extension === '.gif') return 'image/gif'
-  if (extension === '.pdf') return 'application/pdf'
-  if (extension === '.txt') return 'text/plain'
-  if (extension === '.doc') return 'application/msword'
-  if (extension === '.docx') {
-    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  }
-  if (extension === '.xls') return 'application/vnd.ms-excel'
-  if (extension === '.xlsx') {
-    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  }
-  return ''
-}
-
-const prepareAttachmentUpload = (file) => {
-  if (!file || file.buffer.length === 0) return null
-  if (file.buffer.length > MAX_ATTACHMENT_SIZE) {
-    throw new Error('Файл больше 10 МБ')
-  }
-
-  const originalName = sanitizeUploadName(file.originalName)
-  const originalExt = path.extname(originalName).toLowerCase().slice(0, 12)
-  const rawMimeType = String(file.mimeType || '').toLowerCase()
-  const mimeType = rawMimeType || 'application/octet-stream'
-  const genericMimeType = mimeType === 'application/octet-stream'
-  const allowedByMime = allowedAttachmentMimeTypes.has(mimeType)
-  const allowedByExtension =
-    genericMimeType && allowedAttachmentExtensions.has(originalExt)
-
-  if (!allowedByMime && !allowedByExtension) {
-    throw new Error('Этот тип файла пока нельзя отправить')
-  }
-
-  const normalizedMimeType = allowedByMime
-    ? mimeType
-    : mimeTypeForExtension(originalExt) || 'application/octet-stream'
-  const safeOriginalExt = allowedAttachmentExtensions.has(originalExt) ? originalExt : ''
-  const extension = safeOriginalExt || extensionForMimeType(normalizedMimeType)
-  const storedName = `${randomBytes(16).toString('hex')}${extension}`
-  const storagePath = storedName
-
-  return {
-    originalName,
-    storedName,
-    mimeType: normalizedMimeType,
-    size: file.buffer.length,
-    storagePath,
-    buffer: file.buffer,
-  }
-}
-
-const hashPassword = (password) => {
-  const salt = randomBytes(16).toString('hex')
-  const hash = scryptSync(password, salt, 64).toString('hex')
-  return `${salt}:${hash}`
-}
-
-const verifyPassword = (password, stored) => {
-  const [salt, hashHex] = String(stored || '').split(':')
-  if (!salt || !hashHex) return false
-
-  const hashBuffer = Buffer.from(hashHex, 'hex')
-  const inputBuffer = scryptSync(password, salt, 64)
-
-  if (hashBuffer.length !== inputBuffer.length) return false
-  return timingSafeEqual(hashBuffer, inputBuffer)
-}
-
-const createSession = async (userId) => {
-  const sessionId = randomBytes(32).toString('hex')
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString()
-  await createSessionStatement.run(sessionId, userId, expiresAt)
-  return sessionId
-}
-
-const getCurrentUser = async (req) => {
-  await deleteExpiredSessionsStatement.run()
-
-  const cookies = parseCookies(req)
-  const sessionId = cookies[SESSION_COOKIE]
-  if (!sessionId) return null
-
-  const row = await getSessionUserStatement.get(sessionId)
-  if (!row) return null
-
-  if (new Date(row.expires_at).getTime() <= Date.now()) {
-    await deleteSessionStatement.run(sessionId)
-    return null
-  }
-
-  return sanitizeUser(row)
-}
-
-const requireUser = async (req, res) => {
-  const user = await getCurrentUser(req)
-  if (!user) {
-    unauthorized(res)
-    return null
-  }
-  return user
-}
-
-const requireAdmin = async (req, res) => {
-  const user = await requireUser(req, res)
-  if (!user) return null
-  if (user.role !== 'admin') {
-    forbidden(res)
-    return null
-  }
-  return user
-}
-
-const isSuperAdminEmail = (email) =>
-  String(email || '').trim().toLowerCase() === SUPER_ADMIN_EMAIL
-
-const isSuperAdminUser = (user) => isSuperAdminEmail(user?.email)
-
-const toBoolInt = (value, fallback = 0) => {
-  if (value === true || value === 1 || value === '1') return 1
-  if (value === false || value === 0 || value === '0') return 0
-  return fallback
-}
-
-const mapPermissionsRow = (row) => {
-  const source = row || {}
-  return {
-    reportEdit: toBoolInt(source.report_edit) === 1,
-    productsManage: toBoolInt(source.products_manage) === 1,
-    scheduleManage: toBoolInt(source.schedule_manage) === 1,
-    auditView: toBoolInt(source.audit_view) === 1,
-    rolesManage: toBoolInt(source.roles_manage) === 1,
-  }
-}
-
-const getUserPermissions = async (user) => {
-  const row = await getRolePermissionsStatement.get(user?.role || 'employee')
-  return mapPermissionsRow(row)
-}
-
-const requirePermission = async (req, res, key) => {
-  const user = await requireUser(req, res)
-  if (!user) return null
-
-  const permissions = await getUserPermissions(user)
-  if (!permissions[key]) {
-    forbidden(res)
-    return null
-  }
-
-  return { user, permissions }
-}
-
-const normalizeRole = (value) => {
-  const role = String(value || '').toLowerCase().trim()
-  if (!role) return 'employee'
-  if (role === 'owner') return 'admin'
-  if (role === 'chef') return 'chef'
-  if (role === 'admin') return 'admin'
-  return 'employee'
-}
 
 const getToday = () => new Date().toISOString().slice(0, 10)
 const getCurrentWeekStartDate = () => {
@@ -994,168 +150,6 @@ const getCurrentWeekStartDate = () => {
 }
 const isValidShiftRange = (startTime, endTime) =>
   Boolean(startTime && endTime && startTime < endTime)
-const REMINDER_WINDOWS = [
-  { key: '12h', ms: 12 * 60 * 60 * 1000, label: 'через 12 часов' },
-  { key: '2h', ms: 2 * 60 * 60 * 1000, label: 'через 2 часа' },
-]
-const REMINDER_LOOKBACK_MS = 15 * 60 * 1000
-
-const mapNotificationSettings = (row) => ({
-  push_enabled: toBoolInt(row?.push_enabled, 1) === 1,
-  messages_enabled: toBoolInt(row?.messages_enabled, 1) === 1,
-  shifts_enabled: toBoolInt(row?.shifts_enabled, 1) === 1,
-  reminders_enabled: toBoolInt(row?.reminders_enabled, 1) === 1,
-  updated_at: row?.updated_at || null,
-})
-
-const ensureNotificationSettings = async (userId) => {
-  let row = await getNotificationSettingsStatement.get(userId)
-  if (!row) {
-    await upsertNotificationSettingsStatement.run(userId, 1, 1, 1, 1)
-    row = await getNotificationSettingsStatement.get(userId)
-  }
-  return mapNotificationSettings(row)
-}
-
-const parseShiftStart = (date, startTime) => new Date(`${date}T${startTime}:00`)
-
-const buildPushPayload = ({
-  title,
-  body,
-  url,
-  tag,
-  urgency = 'normal',
-}) => ({
-  title,
-  body,
-  url,
-  tag,
-  urgency,
-  icon: '/icons/icon-192.png',
-  badge: '/icons/icon-192.png',
-})
-
-const filterSubscriptionsBySettings = async (userIds, kind) => {
-  const uniqueIds = [...new Set((userIds || []).map((id) => Number(id)).filter(Number.isFinite))]
-  if (uniqueIds.length === 0) return []
-
-  const rows = await listPushSubscriptionsByUserIdsStatement.all(uniqueIds)
-  if (rows.length === 0) return []
-
-  const column =
-    kind === 'messages'
-      ? 'messages_enabled'
-      : kind === 'reminders'
-        ? 'reminders_enabled'
-        : 'shifts_enabled'
-
-  const enabledUsers = new Set()
-  for (const userId of uniqueIds) {
-    const settings = await ensureNotificationSettings(userId)
-    if (settings.push_enabled && settings[column]) enabledUsers.add(userId)
-  }
-
-  return rows.filter((row) => enabledUsers.has(Number(row.user_id)))
-}
-
-const deliverPushRows = async (rows, payload) => {
-  for (const row of rows) {
-    const result = await sendPushNotification(row, payload)
-    if (result.ok) {
-      await markPushSubscriptionSuccessStatement.run(row.endpoint)
-      continue
-    }
-
-    if (result.statusCode === 404 || result.statusCode === 410) {
-      await disablePushSubscriptionStatement.run(row.endpoint)
-      continue
-    }
-
-    await markPushSubscriptionErrorStatement.run(row.endpoint)
-  }
-}
-
-const notifyUsers = async (userIds, kind, payload) => {
-  const rows = await filterSubscriptionsBySettings(userIds, kind)
-  await deliverPushRows(rows, payload)
-}
-
-const notifyUserByName = async (name, kind, payload) => {
-  const user = await getUserByNameStatement.get(name)
-  if (!user) return
-  await notifyUsers([user.id], kind, payload)
-}
-
-const markNotificationIfNeeded = async (dedupeKey, userId, kind) => {
-  const existing = await getNotificationMarkStatement.get(dedupeKey)
-  if (existing) return false
-  await insertNotificationMarkStatement.run(dedupeKey, userId, kind)
-  return true
-}
-
-const processShiftReminders = async () => {
-  const rows = await listReminderShiftsStatement.all(getToday())
-
-  const now = Date.now()
-  for (const shift of rows) {
-    const user = await getUserByNameStatement.get(shift.employee_name)
-    if (!user) continue
-
-    const shiftStart = parseShiftStart(shift.date, shift.start_time).getTime()
-    if (!Number.isFinite(shiftStart) || shiftStart <= now) continue
-
-    for (const window of REMINDER_WINDOWS) {
-      const diff = shiftStart - now
-      if (diff > window.ms || diff < window.ms - REMINDER_LOOKBACK_MS) continue
-
-      const dedupeKey = `shift-reminder:${shift.id}:${window.key}:${user.id}`
-      const shouldSend = await markNotificationIfNeeded(dedupeKey, user.id, 'shift_reminder')
-      if (!shouldSend) continue
-
-      await notifyUsers(
-        [user.id],
-        'reminders',
-        buildPushPayload({
-          title: 'Напоминание о смене',
-          body: `${shift.date} ${shift.start_time}-${shift.end_time}, ${window.label}`,
-          url: '/schedule',
-          tag: `shift-reminder-${shift.id}-${window.key}`,
-        }),
-      )
-    }
-  }
-}
-
-let reminderTimer = null
-
-const startReminderLoop = () => {
-  if (reminderTimer) clearInterval(reminderTimer)
-
-  const run = () => {
-    processShiftReminders().catch((error) => {
-      console.error('Push reminder error', error)
-    })
-  }
-
-  run()
-  reminderTimer = setInterval(run, 60 * 1000)
-}
-
-const stopReminderLoop = () => {
-  if (!reminderTimer) return
-  clearInterval(reminderTimer)
-  reminderTimer = null
-}
-
-const withErrorHandling = async (res, fn) => {
-  try {
-    await fn()
-  } catch (error) {
-    console.error(error)
-    json(res, 500, { error: 'Внутренняя ошибка сервера' })
-  }
-}
-
 const parseShiftId = (pathname) => {
   const match = pathname.match(/^\/api\/shifts\/(\d+)(?:\/([a-z-]+))?$/)
   if (!match) return null
@@ -1177,62 +171,10 @@ const parseUserId = (pathname) => {
   return Number(match[1])
 }
 
-const isEditableResource = (value) =>
-  value === 'schedule' || value === 'assortment'
-
 const parseInteger = (value, fallback) => {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return fallback
   return parsed
-}
-
-const toAuditPayload = (value) => {
-  if (value === undefined || value === null) return null
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return null
-  }
-}
-
-const parseAuditJson = (value) => {
-  if (!value) return null
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value)
-    } catch {
-      return null
-    }
-  }
-  return value
-}
-
-const logAudit = async ({
-  actorUser,
-  entityType,
-  entityId = null,
-  action,
-  before = null,
-  after = null,
-  context = null,
-}) => {
-  if (!actorUser?.id || !action || !entityType) return
-
-  await insertAuditLogStatement.run(
-    actorUser.id,
-    actorUser.name || actorUser.email || 'system',
-    String(entityType),
-    entityId === null || entityId === undefined ? null : String(entityId),
-    String(action),
-    toAuditPayload(before),
-    toAuditPayload(after),
-    toAuditPayload(context),
-  )
-}
-
-const touchResource = async (resource, actorUser) => {
-  if (!isEditableResource(resource)) return
-  await upsertResourceStateStatement.run(resource, actorUser?.name || actorUser?.email || 'system')
 }
 
 const normalizeProductCategory = (value) => {
@@ -1242,11 +184,6 @@ const normalizeProductCategory = (value) => {
   }
   return 'other'
 }
-
-const normalizePersonName = (value) =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
 
 const parseConversationMessagesPath = (pathname) => {
   const match = pathname.match(/^\/api\/messenger\/conversations\/(\d+)\/messages$/)
@@ -1264,136 +201,6 @@ const parseAttachmentPath = (pathname) => {
   const match = pathname.match(/^\/api\/messenger\/attachments\/(\d+)$/)
   if (!match) return null
   return Number(match[1])
-}
-
-const makeDirectConversationKey = (firstUserId, secondUserId) => {
-  const ids = [Number(firstUserId), Number(secondUserId)].sort((a, b) => a - b)
-  return `${ids[0]}:${ids[1]}`
-}
-
-const normalizeGroupTitle = (value) => String(value || '').trim().slice(0, 80)
-
-const normalizeMemberIds = (value, currentUserId) => {
-  const source = Array.isArray(value) ? value : []
-  const ids = new Set()
-
-  for (const item of source) {
-    const id = Number(item)
-    if (!Number.isFinite(id) || id <= 0 || id === currentUserId) continue
-    ids.add(id)
-  }
-
-  return [...ids].slice(0, 50)
-}
-
-const mapMessengerUser = (row) => ({
-  id: row.id,
-  email: row.email,
-  name: row.name,
-  role: row.role,
-  created_at: row.created_at,
-})
-
-const conversationToDto = async (row, currentUser) => {
-  const members = (await listConversationMembersStatement.all(row.id)).map(mapMessengerUser)
-  const otherMember = members.find((member) => member.id !== currentUser.id) || members[0]
-  const displayTitle =
-    row.type === 'direct'
-      ? otherMember?.name || otherMember?.email || 'Диалог'
-      : row.title || 'Диалог'
-
-  return {
-    id: row.id,
-    type: row.type,
-    title: row.title,
-    displayTitle,
-    direct_key: row.direct_key,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    members,
-    lastMessage: row.last_message_id
-      ? {
-          id: row.last_message_id,
-          body: row.last_message_body,
-          created_at: row.last_message_created_at,
-          sender: {
-            id: row.last_sender_id,
-            name: row.last_sender_name,
-          },
-        }
-      : null,
-  }
-}
-
-const attachmentToDto = (row) => ({
-  id: row.id,
-  message_id: row.message_id,
-  original_name: row.original_name,
-  mime_type: row.mime_type,
-  size: row.size,
-  created_at: row.created_at,
-  url: `/api/messenger/attachments/${row.id}`,
-})
-
-const messageToDto = (row, attachments = []) => ({
-  id: row.id,
-  conversation_id: row.conversation_id,
-  sender_user_id: row.sender_user_id,
-  sender_name: row.sender_name || row.sender_email || 'Пользователь',
-  sender_email: row.sender_email,
-  body: row.body || '',
-  reply_to_message_id: row.reply_to_message_id || null,
-  reply_to: row.reply_to_message_id
-    ? {
-        id: row.reply_to_message_id,
-        sender_user_id: row.reply_sender_user_id,
-        sender_name:
-          row.reply_sender_name || row.reply_sender_email || 'Пользователь',
-        sender_email: row.reply_sender_email,
-        body: row.reply_body || '',
-        has_attachment: Number(row.reply_attachment_count || 0) > 0,
-      }
-    : null,
-  created_at: row.created_at,
-  attachments: attachments.map(attachmentToDto),
-})
-
-const buildMessagePreview = (body, hasAttachment) => {
-  const text = String(body || '').trim()
-  if (text) return text.slice(0, 120)
-  if (hasAttachment) return 'Файл'
-  return 'Новое сообщение'
-}
-
-const listMessageDtos = async (conversationId, limit) => {
-  const messageRows = await listMessagesStatement.all(conversationId, conversationId, limit)
-  const attachmentsByMessage = new Map()
-
-  for (const attachment of await listAttachmentsForConversationStatement.all(conversationId)) {
-    const list = attachmentsByMessage.get(attachment.message_id) || []
-    list.push(attachment)
-    attachmentsByMessage.set(attachment.message_id, list)
-  }
-
-  return messageRows.map((row) =>
-    messageToDto(row, attachmentsByMessage.get(row.id) || []),
-  )
-}
-
-const ensureConversationMember = async (conversationId, user, res) => {
-  const conversation = await getConversationByIdStatement.get(conversationId)
-  if (!conversation) {
-    notFound(res, 'Диалог не найден')
-    return null
-  }
-
-  const member = await isConversationMemberStatement.get(conversationId, user.id)
-  if (!member) {
-    forbidden(res, 'У вас нет доступа к этому диалогу')
-    return null
-  }
-
-  return conversation
 }
 
 const appServer = http.createServer((req, res) => {
@@ -2766,43 +1573,7 @@ const appServer = http.createServer((req, res) => {
       return
     }
 
-    if (!hasDist) {
-      json(res, 404, {
-        error:
-          'Фронтенд не собран. Запустите `npm run dev` для разработки или `npm run build` для прод-режима.',
-      })
-      return
-    }
-
-    const requestedPath = pathname === '/' ? '/index.html' : pathname
-    const safePath = path
-      .normalize(requestedPath)
-      .replace(/^\.\.(?:\/|\\|$)+/, '')
-
-    const absolutePath = path.join(distDir, safePath)
-    const insideDist = absolutePath.startsWith(distDir)
-    const filePath = insideDist && fs.existsSync(absolutePath) ? absolutePath : null
-
-    const fallbackPath = path.join(distDir, 'index.html')
-    const outputPath = filePath || fallbackPath
-
-    const ext = path.extname(outputPath)
-    const contentType = mimeTypes[ext] || 'application/octet-stream'
-    const cacheControl =
-      outputPath.endsWith('index.html') ||
-      outputPath.endsWith('sw.js') ||
-      outputPath.endsWith('app-version.json') ||
-      outputPath.endsWith('manifest.webmanifest')
-        ? 'no-cache'
-        : 'public, max-age=31536000, immutable'
-
-    const data = fs.readFileSync(outputPath)
-    res.writeHead(200, {
-      'Content-Type': contentType,
-      'Content-Length': data.length,
-      'Cache-Control': cacheControl,
-    })
-    res.end(data)
+    serveStaticFile(req, res, pathname)
   })
 })
 

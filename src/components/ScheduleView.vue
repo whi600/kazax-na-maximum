@@ -20,13 +20,13 @@ import {
 import DatePickerSheet from './DatePickerSheet.vue'
 import {
   Calendar,
-  X,
   Trash2,
-  Check,
   Bell,
   Plus,
   Pencil,
 } from 'lucide-vue-next'
+import SchedulePendingRequestsSheet from './SchedulePendingRequestsSheet.vue'
+import ScheduleShiftModal from './ScheduleShiftModal.vue'
 
 const props = defineProps({
   userRole: { type: String, default: '' },
@@ -79,8 +79,6 @@ let weekTapTimer = null
 let schedulePresenceTimer = null
 
 const form = ref({ date: '', start_time: '09:00', end_time: '18:00' })
-const startTimeInput = ref(null)
-const endTimeInput = ref(null)
 
 const safeAlert = (message) => alert(message)
 const safeConfirm = (message, callback) => callback(window.confirm(message))
@@ -216,22 +214,6 @@ const ensureSchedulePresence = async () => {
   schedulePresenceTimer = setInterval(() => {
     syncSchedulePresence()
   }, 8000)
-}
-
-const openPicker = (inputRef) => {
-  const input =
-    typeof inputRef?.showPicker === 'function' || typeof inputRef?.focus === 'function'
-      ? inputRef
-      : inputRef?.value
-  if (!input) return
-
-  if (typeof input.showPicker === 'function') {
-    input.showPicker()
-    return
-  }
-
-  if (typeof input.focus === 'function') input.focus()
-  if (typeof input.click === 'function') input.click()
 }
 
 const hasBootstrappedDefaultWeeks = () => {
@@ -999,100 +981,22 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <Teleport to="body">
-      <div
-        v-if="isModalOpen"
-        class="fixed inset-0 z-[130] bg-slate-50/98 backdrop-blur-sm"
-      >
-        <div class="flex h-full min-h-[100dvh] flex-col">
-          <div class="flex items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/95 px-4 pb-3 pt-safe">
-            <div class="min-w-0">
-              <p class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
-                {{ modalEyebrow }}
-              </p>
-              <h3 class="truncate text-xl font-black uppercase italic tracking-tighter text-slate-900">
-                {{ modalTitle }}
-              </h3>
-            </div>
-            <button @click="closeModal" class="rounded-full bg-white p-2 text-slate-400 shadow-sm">
-              <X class="w-6 h-6" />
-            </button>
-          </div>
-
-          <div class="flex-1 overflow-y-auto px-4 py-5">
-            <div class="mx-auto flex min-h-full w-full max-w-md flex-col justify-center">
-              <div class="rounded-[30px] border border-slate-100 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.08)]">
-                <p class="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Заполните детали
-                </p>
-
-                <div class="space-y-4">
-                  <button
-                    type="button"
-                    class="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 text-left transition-colors active:bg-slate-100"
-                    @click="showDatePicker = true"
-                  >
-                    <span class="mb-2 block text-[10px] font-black uppercase text-slate-400">Выберите дату</span>
-                    <span class="block text-base font-bold text-slate-900">{{ formatDateInput(form.date) }}</span>
-                  </button>
-
-                  <div class="grid grid-cols-2 gap-4">
-                    <div
-                      class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
-                      @click="openPicker(startTimeInput)"
-                    >
-                      <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Начало</label>
-                      <input
-                        ref="startTimeInput"
-                        type="time"
-                        v-model="form.start_time"
-                        class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"
-                      />
-                    </div>
-                    <div
-                      class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
-                      @click="openPicker(endTimeInput)"
-                    >
-                      <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Конец</label>
-                      <input
-                        ref="endTimeInput"
-                        type="time"
-                        v-model="form.end_time"
-                        class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="h-6 shrink-0" />
-            </div>
-          </div>
-
-          <div class="border-t border-slate-100 bg-white px-4 pb-[calc(1rem+var(--app-safe-bottom,env(safe-area-inset-bottom)))] pt-3">
-            <div class="mx-auto flex w-full max-w-md gap-3">
-              <div
-                class="flex-1"
-              >
-                <button
-                  type="button"
-                  @click="closeModal"
-                  class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-[11px] font-black uppercase text-slate-500 transition-colors active:bg-slate-100"
-                >
-                  Отмена
-                </button>
-              </div>
-              <button
-                @click="handleSaveModal"
-                class="flex-[1.35] rounded-2xl bg-blue-600 px-4 py-4 text-[11px] font-black uppercase text-white shadow-xl shadow-blue-200 transition-all active:scale-[0.99]"
-              >
-                {{ modalSubmitLabel }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <ScheduleShiftModal
+      v-if="isModalOpen"
+      :eyebrow="modalEyebrow"
+      :title="modalTitle"
+      :submit-label="modalSubmitLabel"
+      :formatted-date="formatDateInput(form.date)"
+      :date="form.date"
+      :start-time="form.start_time"
+      :end-time="form.end_time"
+      @close="closeModal"
+      @submit="handleSaveModal"
+      @open-date-picker="showDatePicker = true"
+      @update:date="form.date = $event"
+      @update:start-time="form.start_time = $event"
+      @update:end-time="form.end_time = $event"
+    />
 
     <DatePickerSheet
       v-if="showDatePicker"
@@ -1102,77 +1006,14 @@ onBeforeUnmount(() => {
       @close="showDatePicker = false"
     />
 
-    <div
+    <SchedulePendingRequestsSheet
       v-if="showPendingSheet && canManageSchedule"
-      class="fixed inset-0 z-[110] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm pt-safe"
-      @click.self="showPendingSheet = false"
-    >
-      <div class="bg-white w-full max-w-md sheet-max rounded-t-[28px] p-4 sheet-safe shadow-2xl animate-in slide-in-from-bottom duration-300 overflow-hidden flex flex-col">
-        <div class="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-4" />
-
-        <div class="flex justify-between items-start gap-4 mb-4">
-          <div>
-            <h3 class="text-xl font-black uppercase italic tracking-tighter">
-              Заявки
-            </h3>
-            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-              {{ pendingRequests.length }} на подтверждение
-            </p>
-          </div>
-          <button @click="showPendingSheet = false" class="bg-slate-50 p-2 rounded-full text-slate-300">
-            <X class="w-5 h-5" />
-          </button>
-        </div>
-
-        <div v-if="pendingRequests.length === 0" class="text-center py-12 opacity-30">
-          <Bell class="w-10 h-10 mx-auto mb-3" />
-          <p class="text-xs font-black uppercase">Заявок нет</p>
-        </div>
-
-        <div v-else class="space-y-2 overflow-y-auto pb-2">
-          <div
-            v-for="req in pendingRequests"
-            :key="req.id"
-            class="bg-slate-50 border border-slate-100 rounded-2xl p-3"
-          >
-            <div class="flex items-start justify-between gap-3 mb-3">
-              <div>
-                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  {{ formatDateHeader(req.date) }}
-                </p>
-                <p class="text-base font-black text-slate-800 mt-1">
-                  {{ req.start_time }}–{{ req.end_time }}
-                </p>
-              </div>
-              <span class="bg-blue-50 text-blue-600 border border-blue-100 px-2 py-1 rounded-lg text-[9px] font-black uppercase">
-                Помочь
-              </span>
-            </div>
-
-            <p class="text-[11px] font-black text-blue-600 uppercase mb-3">
-              {{ req.employee_name }}
-            </p>
-
-            <div class="grid grid-cols-2 gap-2">
-              <button
-                @click="rejectRequest(req.id)"
-                class="bg-red-50 text-red-500 py-3 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-              >
-                <X class="w-4 h-4" />
-                Отклонить
-              </button>
-              <button
-                @click="approveRequest(req)"
-                class="bg-blue-600 text-white py-3 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-              >
-                <Check class="w-4 h-4" />
-                Подтвердить
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      :requests="pendingRequests"
+      :format-date-header="formatDateHeader"
+      @close="showPendingSheet = false"
+      @reject="rejectRequest"
+      @approve="approveRequest"
+    />
   </div>
 </template>
 
