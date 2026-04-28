@@ -59,6 +59,13 @@ const scheduleCollabStatus = ref({
   lastChangedAt: null,
   lastChangedBy: null,
 })
+const overlayScrollState = {
+  htmlOverflow: '',
+  bodyOverflow: '',
+  bodyTouchAction: '',
+  htmlOverscrollBehavior: '',
+  bodyOverscrollBehavior: '',
+}
 let structureStatusHideTimer = null
 let structureAutosaveTimer = null
 let suppressStructureAutosave = false
@@ -77,6 +84,10 @@ const safeAlert = (message) => alert(message)
 const safeConfirm = (message, callback) => callback(window.confirm(message))
 const canManageSchedule = computed(
   () => Boolean(props.permissions?.scheduleManage || props.userRole === 'admin'),
+)
+
+const isAnyOverlayOpen = computed(
+  () => isModalOpen.value || showDatePicker.value || showPendingSheet.value,
 )
 
 const setStructureSaveStatus = (status) => {
@@ -125,6 +136,38 @@ const stopSchedulePresence = async () => {
       // noop
     }
   }
+}
+
+const lockPageScroll = () => {
+  if (typeof document === 'undefined') return
+  const { documentElement, body } = document
+
+  if (!overlayScrollState.htmlOverflow) overlayScrollState.htmlOverflow = documentElement.style.overflow
+  if (!overlayScrollState.bodyOverflow) overlayScrollState.bodyOverflow = body.style.overflow
+  if (!overlayScrollState.bodyTouchAction) overlayScrollState.bodyTouchAction = body.style.touchAction
+  if (!overlayScrollState.htmlOverscrollBehavior) {
+    overlayScrollState.htmlOverscrollBehavior = documentElement.style.overscrollBehavior
+  }
+  if (!overlayScrollState.bodyOverscrollBehavior) {
+    overlayScrollState.bodyOverscrollBehavior = body.style.overscrollBehavior
+  }
+
+  documentElement.style.overflow = 'hidden'
+  documentElement.style.overscrollBehavior = 'none'
+  body.style.overflow = 'hidden'
+  body.style.overscrollBehavior = 'none'
+  body.style.touchAction = 'none'
+}
+
+const unlockPageScroll = () => {
+  if (typeof document === 'undefined') return
+  const { documentElement, body } = document
+
+  documentElement.style.overflow = overlayScrollState.htmlOverflow
+  documentElement.style.overscrollBehavior = overlayScrollState.htmlOverscrollBehavior
+  body.style.overflow = overlayScrollState.bodyOverflow
+  body.style.overscrollBehavior = overlayScrollState.bodyOverscrollBehavior
+  body.style.touchAction = overlayScrollState.bodyTouchAction
 }
 
 const syncSchedulePresence = async () => {
@@ -663,11 +706,24 @@ watch(
 onMounted(initialize)
 onMounted(ensureSchedulePresence)
 
+watch(
+  isAnyOverlayOpen,
+  (isOpen) => {
+    if (isOpen) {
+      lockPageScroll()
+      return
+    }
+    unlockPageScroll()
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   if (structureAutosaveTimer) clearTimeout(structureAutosaveTimer)
   if (structureStatusHideTimer) clearTimeout(structureStatusHideTimer)
   if (weekTapTimer) clearTimeout(weekTapTimer)
   stopSchedulePresence()
+  unlockPageScroll()
 })
 </script>
 
@@ -819,8 +875,8 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="isModalOpen" class="fixed inset-0 z-[130] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm p-4 pt-safe">
-      <div class="bg-white w-full max-w-sm rounded-[32px] p-8 sheet-safe sheet-max overflow-y-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
+    <div v-if="isModalOpen" class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4 pt-safe">
+      <div class="bg-white w-full max-w-sm rounded-[32px] p-8 sheet-safe modal-sheet-max overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         <div class="flex justify-between items-center mb-8">
           <div>
             <h3 class="text-xl font-black uppercase italic tracking-tighter">
@@ -982,6 +1038,12 @@ onBeforeUnmount(() => {
 
 .animate-swing {
   animation: swing 2s infinite;
+}
+
+.modal-sheet-max {
+  max-height: calc(
+    100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+  );
 }
 
 .schedule-shell-enter-active,
