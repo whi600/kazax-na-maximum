@@ -25,6 +25,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      TZ: ${APP_TIMEZONE:-Asia/Yekaterinburg}
       HOST: 0.0.0.0
       PORT: 8787
       PGHOST: db

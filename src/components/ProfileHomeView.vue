@@ -1,5 +1,6 @@
 <script setup>
 import {
+  BellRing,
   LogOut,
   Pencil,
   ShieldCheck,
@@ -15,7 +16,7 @@ defineProps({
   canManageRoles: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['open-assortment', 'open-roles', 'logout'])
+const emit = defineEmits(['open-assortment', 'open-notifications', 'open-roles', 'logout'])
 </script>
 
 <template>
@@ -41,6 +42,15 @@ const emit = defineEmits(['open-assortment', 'open-roles', 'logout'])
     </div>
 
     <div class="grid gap-2 mb-5">
+      <button
+        type="button"
+        @click="emit('open-notifications')"
+        class="w-full bg-slate-50 text-slate-700 py-3 rounded-lg text-[11px] font-black uppercase flex items-center justify-center gap-2 active:scale-95 transition-all border border-slate-100"
+      >
+        <BellRing class="w-4 h-4" />
+        Уведомления
+      </button>
+
       <button
         v-if="canManageProducts"
         type="button"

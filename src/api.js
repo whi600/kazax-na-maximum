@@ -117,7 +117,27 @@ export const editingApi = {
     apiRequest('/api/editing/touch', {
       method: 'POST',
       body: JSON.stringify({ resource }),
+  }),
+}
+
+export const notificationsApi = {
+  settings: () => apiRequest('/api/notifications/settings', { method: 'GET' }),
+  updateSettings: (payload) =>
+    apiRequest('/api/notifications/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     }),
+  subscribe: (payload) =>
+    apiRequest('/api/notifications/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  unsubscribe: (endpoint) =>
+    apiRequest('/api/notifications/subscriptions', {
+      method: 'DELETE',
+      body: JSON.stringify({ endpoint }),
+    }),
+  test: () => apiRequest('/api/notifications/test', { method: 'POST' }),
 }
 
 export const messengerApi = {

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { db, dbPath } from './db.js'
+import { pushConfig, sendPushNotification } from './push.js'
 
 const HOST = process.env.HOST || '0.0.0.0'
 const PORT = Number(process.env.PORT || 8787)
@@ -68,10 +69,24 @@ const getUserByEmailStatement = db.prepare('SELECT * FROM users WHERE email = ?'
 const getUserByIdStatement = db.prepare(
   'SELECT id, email, name, role, created_at FROM users WHERE id = ?',
 )
+const getUserByNameStatement = db.prepare(`
+  SELECT id, email, name, role, created_at
+  FROM users
+  WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+  ORDER BY created_at DESC, id DESC
+  LIMIT 1
+`)
 const listUsersForRoleManageStatement = db.prepare(`
   SELECT id, email, name, role, created_at
   FROM users
   ORDER BY created_at DESC, id DESC
+`)
+const listUsersWithScheduleManageStatement = db.prepare(`
+  SELECT u.id, u.email, u.name, u.role, u.created_at
+  FROM users u
+  JOIN role_permissions rp ON rp.role = u.role
+  WHERE rp.schedule_manage = 1
+  ORDER BY u.created_at DESC, u.id DESC
 `)
 const updateUserRoleStatement = db.prepare(
   "UPDATE users SET role = ? WHERE id = ?",
@@ -218,9 +233,17 @@ const listAllShiftsStatement = db.prepare(`
   FROM shifts
   ORDER BY date DESC, start_time DESC
 `)
+const listReminderShiftsStatement = db.prepare(`
+  SELECT id, date, start_time, end_time, employee_name
+  FROM shifts
+  WHERE status = 'approved'
+    AND employee_name IS NOT NULL
+    AND date >= ?
+  ORDER BY date ASC, start_time ASC
+`)
 
 const getShiftByIdStatement = db.prepare(
-  'SELECT id, date, start_time, end_time, employee_name, status FROM shifts WHERE id = ?',
+  'SELECT id, date, start_time, end_time, employee_name, status, created_by FROM shifts WHERE id = ?',
 )
 
 const insertShiftStatement = db.prepare(`
@@ -238,6 +261,92 @@ const updateShiftStatusStatement = db.prepare(
 )
 const updateShiftDetailsStatement = db.prepare(
   "UPDATE shifts SET date = ?, start_time = ?, end_time = ?, updated_at = datetime('now') WHERE id = ?",
+)
+const getNotificationSettingsStatement = db.prepare(`
+  SELECT
+    user_id,
+    push_enabled,
+    messages_enabled,
+    shifts_enabled,
+    reminders_enabled,
+    updated_at
+  FROM notification_settings
+  WHERE user_id = ?
+`)
+const upsertNotificationSettingsStatement = db.prepare(`
+  INSERT INTO notification_settings(
+    user_id,
+    push_enabled,
+    messages_enabled,
+    shifts_enabled,
+    reminders_enabled,
+    updated_at
+  )
+  VALUES (?, ?, ?, ?, ?, datetime('now'))
+  ON CONFLICT(user_id)
+  DO UPDATE SET
+    push_enabled = excluded.push_enabled,
+    messages_enabled = excluded.messages_enabled,
+    shifts_enabled = excluded.shifts_enabled,
+    reminders_enabled = excluded.reminders_enabled,
+    updated_at = datetime('now')
+`)
+const upsertPushSubscriptionStatement = db.prepare(`
+  INSERT INTO push_subscriptions(
+    user_id,
+    endpoint,
+    p256dh_key,
+    auth_key,
+    user_agent,
+    updated_at,
+    disabled_at,
+    last_error_at
+  )
+  VALUES (?, ?, ?, ?, ?, datetime('now'), NULL, NULL)
+  ON CONFLICT(endpoint)
+  DO UPDATE SET
+    user_id = excluded.user_id,
+    p256dh_key = excluded.p256dh_key,
+    auth_key = excluded.auth_key,
+    user_agent = excluded.user_agent,
+    updated_at = datetime('now'),
+    disabled_at = NULL,
+    last_error_at = NULL
+`)
+const deletePushSubscriptionStatement = db.prepare(
+  'DELETE FROM push_subscriptions WHERE endpoint = ?',
+)
+const listPushSubscriptionsByUserIdsStatement = db.prepare(`
+  SELECT
+    ps.id,
+    ps.user_id,
+    ps.endpoint,
+    ps.p256dh_key,
+    ps.auth_key,
+    ps.user_agent,
+    ps.created_at,
+    ps.updated_at,
+    ps.last_success_at,
+    ps.last_error_at,
+    ps.disabled_at
+  FROM push_subscriptions ps
+  WHERE ps.user_id = ANY(?::int[])
+    AND ps.disabled_at IS NULL
+`)
+const markPushSubscriptionSuccessStatement = db.prepare(
+  "UPDATE push_subscriptions SET last_success_at = datetime('now'), last_error_at = NULL, updated_at = datetime('now') WHERE endpoint = ?",
+)
+const markPushSubscriptionErrorStatement = db.prepare(
+  "UPDATE push_subscriptions SET last_error_at = datetime('now'), updated_at = datetime('now') WHERE endpoint = ?",
+)
+const disablePushSubscriptionStatement = db.prepare(
+  "UPDATE push_subscriptions SET disabled_at = datetime('now'), last_error_at = datetime('now'), updated_at = datetime('now') WHERE endpoint = ?",
+)
+const getNotificationMarkStatement = db.prepare(
+  'SELECT dedupe_key, user_id, kind, created_at FROM notification_marks WHERE dedupe_key = ?',
+)
+const insertNotificationMarkStatement = db.prepare(
+  'INSERT INTO notification_marks(dedupe_key, user_id, kind) VALUES (?, ?, ?)',
 )
 
 const deleteShiftStatement = db.prepare('DELETE FROM shifts WHERE id = ?')
@@ -877,6 +986,158 @@ const normalizeRole = (value) => {
 const getToday = () => new Date().toISOString().slice(0, 10)
 const isValidShiftRange = (startTime, endTime) =>
   Boolean(startTime && endTime && startTime < endTime)
+const REMINDER_WINDOWS = [
+  { key: '12h', ms: 12 * 60 * 60 * 1000, label: 'через 12 часов' },
+  { key: '2h', ms: 2 * 60 * 60 * 1000, label: 'через 2 часа' },
+]
+const REMINDER_LOOKBACK_MS = 15 * 60 * 1000
+
+const mapNotificationSettings = (row) => ({
+  push_enabled: toBoolInt(row?.push_enabled, 1) === 1,
+  messages_enabled: toBoolInt(row?.messages_enabled, 1) === 1,
+  shifts_enabled: toBoolInt(row?.shifts_enabled, 1) === 1,
+  reminders_enabled: toBoolInt(row?.reminders_enabled, 1) === 1,
+  updated_at: row?.updated_at || null,
+})
+
+const ensureNotificationSettings = async (userId) => {
+  let row = await getNotificationSettingsStatement.get(userId)
+  if (!row) {
+    await upsertNotificationSettingsStatement.run(userId, 1, 1, 1, 1)
+    row = await getNotificationSettingsStatement.get(userId)
+  }
+  return mapNotificationSettings(row)
+}
+
+const parseShiftStart = (date, startTime) => new Date(`${date}T${startTime}:00`)
+
+const buildPushPayload = ({
+  title,
+  body,
+  url,
+  tag,
+  urgency = 'normal',
+}) => ({
+  title,
+  body,
+  url,
+  tag,
+  urgency,
+  icon: '/icons/icon-192.png',
+  badge: '/icons/icon-192.png',
+})
+
+const filterSubscriptionsBySettings = async (userIds, kind) => {
+  const uniqueIds = [...new Set((userIds || []).map((id) => Number(id)).filter(Number.isFinite))]
+  if (uniqueIds.length === 0) return []
+
+  const rows = await listPushSubscriptionsByUserIdsStatement.all(uniqueIds)
+  if (rows.length === 0) return []
+
+  const column =
+    kind === 'messages'
+      ? 'messages_enabled'
+      : kind === 'reminders'
+        ? 'reminders_enabled'
+        : 'shifts_enabled'
+
+  const enabledUsers = new Set()
+  for (const userId of uniqueIds) {
+    const settings = await ensureNotificationSettings(userId)
+    if (settings.push_enabled && settings[column]) enabledUsers.add(userId)
+  }
+
+  return rows.filter((row) => enabledUsers.has(Number(row.user_id)))
+}
+
+const deliverPushRows = async (rows, payload) => {
+  for (const row of rows) {
+    const result = await sendPushNotification(row, payload)
+    if (result.ok) {
+      await markPushSubscriptionSuccessStatement.run(row.endpoint)
+      continue
+    }
+
+    if (result.statusCode === 404 || result.statusCode === 410) {
+      await disablePushSubscriptionStatement.run(row.endpoint)
+      continue
+    }
+
+    await markPushSubscriptionErrorStatement.run(row.endpoint)
+  }
+}
+
+const notifyUsers = async (userIds, kind, payload) => {
+  const rows = await filterSubscriptionsBySettings(userIds, kind)
+  await deliverPushRows(rows, payload)
+}
+
+const notifyUserByName = async (name, kind, payload) => {
+  const user = await getUserByNameStatement.get(name)
+  if (!user) return
+  await notifyUsers([user.id], kind, payload)
+}
+
+const markNotificationIfNeeded = async (dedupeKey, userId, kind) => {
+  const existing = await getNotificationMarkStatement.get(dedupeKey)
+  if (existing) return false
+  await insertNotificationMarkStatement.run(dedupeKey, userId, kind)
+  return true
+}
+
+const processShiftReminders = async () => {
+  const rows = await listReminderShiftsStatement.all(getToday())
+
+  const now = Date.now()
+  for (const shift of rows) {
+    const user = await getUserByNameStatement.get(shift.employee_name)
+    if (!user) continue
+
+    const shiftStart = parseShiftStart(shift.date, shift.start_time).getTime()
+    if (!Number.isFinite(shiftStart) || shiftStart <= now) continue
+
+    for (const window of REMINDER_WINDOWS) {
+      const diff = shiftStart - now
+      if (diff > window.ms || diff < window.ms - REMINDER_LOOKBACK_MS) continue
+
+      const dedupeKey = `shift-reminder:${shift.id}:${window.key}:${user.id}`
+      const shouldSend = await markNotificationIfNeeded(dedupeKey, user.id, 'shift_reminder')
+      if (!shouldSend) continue
+
+      await notifyUsers(
+        [user.id],
+        'reminders',
+        buildPushPayload({
+          title: 'Напоминание о смене',
+          body: `${shift.date} ${shift.start_time}-${shift.end_time}, ${window.label}`,
+          url: '/schedule',
+          tag: `shift-reminder-${shift.id}-${window.key}`,
+        }),
+      )
+    }
+  }
+}
+
+let reminderTimer = null
+
+const startReminderLoop = () => {
+  if (reminderTimer) clearInterval(reminderTimer)
+
+  const run = () => {
+    processShiftReminders().catch((error) => {
+      console.error('Push reminder error', error)
+    })
+  }
+
+  run()
+  reminderTimer = setInterval(run, 60 * 1000)
+}
+
+const stopReminderLoop = () => {
+  if (!reminderTimer) return
+  clearInterval(reminderTimer)
+  reminderTimer = null
+}
 
 const withErrorHandling = async (res, fn) => {
   try {
@@ -1089,6 +1350,13 @@ const messageToDto = (row, attachments = []) => ({
   attachments: attachments.map(attachmentToDto),
 })
 
+const buildMessagePreview = (body, hasAttachment) => {
+  const text = String(body || '').trim()
+  if (text) return text.slice(0, 120)
+  if (hasAttachment) return 'Файл'
+  return 'Новое сообщение'
+}
+
 const listMessageDtos = async (conversationId, limit) => {
   const messageRows = await listMessagesStatement.all(conversationId, conversationId, limit)
   const attachmentsByMessage = new Map()
@@ -1219,6 +1487,111 @@ const appServer = http.createServer((req, res) => {
         permissions: await getUserPermissions(user),
         isSuperAdmin: isSuperAdminUser(user),
       })
+      return
+    }
+
+    if (pathname === '/api/notifications/settings' && req.method === 'GET') {
+      const user = await requireUser(req, res)
+      if (!user) return
+
+      json(res, 200, {
+        settings: await ensureNotificationSettings(user.id),
+        pushAvailable: pushConfig.enabled,
+        publicKey: pushConfig.publicKey,
+      })
+      return
+    }
+
+    if (pathname === '/api/notifications/settings' && req.method === 'PUT') {
+      const user = await requireUser(req, res)
+      if (!user) return
+
+      const current = await ensureNotificationSettings(user.id)
+      const body = await readJsonBody(req)
+      const next = {
+        push_enabled: body.push_enabled ?? current.push_enabled,
+        messages_enabled: body.messages_enabled ?? current.messages_enabled,
+        shifts_enabled: body.shifts_enabled ?? current.shifts_enabled,
+        reminders_enabled: body.reminders_enabled ?? current.reminders_enabled,
+      }
+
+      await upsertNotificationSettingsStatement.run(
+        user.id,
+        toBoolInt(next.push_enabled, 1),
+        toBoolInt(next.messages_enabled, 1),
+        toBoolInt(next.shifts_enabled, 1),
+        toBoolInt(next.reminders_enabled, 1),
+      )
+
+      json(res, 200, {
+        settings: await ensureNotificationSettings(user.id),
+        pushAvailable: pushConfig.enabled,
+        publicKey: pushConfig.publicKey,
+      })
+      return
+    }
+
+    if (pathname === '/api/notifications/subscriptions' && req.method === 'POST') {
+      const user = await requireUser(req, res)
+      if (!user) return
+
+      const body = await readJsonBody(req)
+      const subscription = body.subscription || {}
+      const endpoint = String(subscription.endpoint || '').trim()
+      const p256dh = String(subscription.keys?.p256dh || '').trim()
+      const authKey = String(subscription.keys?.auth || '').trim()
+      const userAgent = String(body.userAgent || '').trim().slice(0, 500)
+
+      if (!endpoint || !p256dh || !authKey) {
+        badRequest(res, 'Некорректная push-подписка')
+        return
+      }
+
+      await upsertPushSubscriptionStatement.run(
+        user.id,
+        endpoint,
+        p256dh,
+        authKey,
+        userAgent || null,
+      )
+      await ensureNotificationSettings(user.id)
+
+      json(res, 200, { ok: true })
+      return
+    }
+
+    if (pathname === '/api/notifications/subscriptions' && req.method === 'DELETE') {
+      const user = await requireUser(req, res)
+      if (!user) return
+
+      const body = await readJsonBody(req)
+      const endpoint = String(body.endpoint || '').trim()
+      if (!endpoint) {
+        badRequest(res, 'Не передан endpoint подписки')
+        return
+      }
+
+      await deletePushSubscriptionStatement.run(endpoint)
+      json(res, 200, { ok: true })
+      return
+    }
+
+    if (pathname === '/api/notifications/test' && req.method === 'POST') {
+      const user = await requireUser(req, res)
+      if (!user) return
+
+      await notifyUsers(
+        [user.id],
+        'messages',
+        buildPushPayload({
+          title: 'Тест уведомлений',
+          body: 'Push-уведомления работают на этом устройстве',
+          url: '/profile',
+          tag: `push-test-${user.id}`,
+        }),
+      )
+
+      json(res, 200, { ok: true })
       return
     }
 
@@ -1471,6 +1844,21 @@ const appServer = http.createServer((req, res) => {
         },
       })
 
+      const scheduleManagers = (await listUsersWithScheduleManageStatement.all())
+        .map((row) => row.id)
+        .filter((id) => id !== user.id)
+      await notifyUsers(
+        scheduleManagers,
+        'shifts',
+        buildPushPayload({
+          title: 'Новая заявка на смену',
+          body: `${user.name}: ${date} ${startTime}-${endTime}`,
+          url: '/schedule',
+          tag: `shift-help-request-${Number(result.lastInsertRowid)}`,
+          urgency: 'high',
+        }),
+      )
+
       json(res, 201, { id: Number(result.lastInsertRowid) })
       return
     }
@@ -1646,6 +2034,22 @@ const appServer = http.createServer((req, res) => {
           before: shift,
           after: { ...shift, date, start_time: startTime, end_time: endTime },
         })
+        if (
+          shift.employee_name &&
+          normalizePersonName(shift.employee_name) !== normalizePersonName(authUser.name)
+        ) {
+          await notifyUserByName(
+            shift.employee_name,
+            'shifts',
+            buildPushPayload({
+              title: 'Смена изменена',
+              body: `Новая дата или время: ${date} ${startTime}-${endTime}`,
+              url: '/schedule',
+              tag: `shift-updated-${shiftAction.id}`,
+              urgency: 'high',
+            }),
+          )
+        }
         json(res, 200, { ok: true })
         return
       }
@@ -1691,6 +2095,19 @@ const appServer = http.createServer((req, res) => {
           before: shift,
           after: { ...shift, status: 'approved' },
         })
+        if (shift.created_by) {
+          await notifyUsers(
+            [shift.created_by],
+            'shifts',
+            buildPushPayload({
+              title: 'Заявка на смену подтверждена',
+              body: `${shift.date} ${shift.start_time}-${shift.end_time}`,
+              url: '/schedule',
+              tag: `shift-approved-${shiftAction.id}`,
+              urgency: 'high',
+            }),
+          )
+        }
         json(res, 200, { ok: true })
         return
       }
@@ -1711,6 +2128,19 @@ const appServer = http.createServer((req, res) => {
           action: 'shift.delete',
           before: shift,
         })
+        if (shift.status === 'pending' && shift.created_by) {
+          await notifyUsers(
+            [shift.created_by],
+            'shifts',
+            buildPushPayload({
+              title: 'Заявка на смену отклонена',
+              body: `${shift.date} ${shift.start_time}-${shift.end_time}`,
+              url: '/schedule',
+              tag: `shift-rejected-${shiftAction.id}`,
+              urgency: 'high',
+            }),
+          )
+        }
         json(res, 200, { ok: true })
         return
       }
@@ -1941,6 +2371,16 @@ const appServer = http.createServer((req, res) => {
       })
 
       const conversation = await getConversationByIdStatement.get(conversationId)
+      await notifyUsers(
+        memberIds,
+        'messages',
+        buildPushPayload({
+          title: 'Вас добавили в группу',
+          body: `Новый чат: ${title}`,
+          url: '/messenger',
+          tag: `group-created-${conversationId}`,
+        }),
+      )
       json(res, 201, { conversation: await conversationToDto(conversation, user) })
       return
     }
@@ -1981,6 +2421,16 @@ const appServer = http.createServer((req, res) => {
 
       const updatedConversation = await getConversationByIdStatement.get(
         messengerMembersConversationId,
+      )
+      await notifyUsers(
+        memberIds,
+        'messages',
+        buildPushPayload({
+          title: 'Вас добавили в группу',
+          body: `Чат: ${conversation.title || 'Группа'}`,
+          url: '/messenger',
+          tag: `group-members-added-${messengerMembersConversationId}`,
+        }),
       )
       json(res, 200, { conversation: await conversationToDto(updatedConversation, user) })
       return
@@ -2103,6 +2553,26 @@ const appServer = http.createServer((req, res) => {
 
       const messageRow = await getMessageByIdStatement.get(messageId)
       const attachments = await listAttachmentsForMessageStatement.all(messageId)
+      const members = await listConversationMembersStatement.all(messengerConversationId)
+      const recipientIds = members
+        .map((member) => Number(member.id))
+        .filter((id) => Number.isFinite(id) && id !== user.id)
+      const messagePreview = buildMessagePreview(messageBody, Boolean(attachment))
+      const notificationTitle =
+        conversation.type === 'direct'
+          ? user.name || 'Новое сообщение'
+          : conversation.title || 'Сообщения'
+
+      await notifyUsers(
+        recipientIds,
+        'messages',
+        buildPushPayload({
+          title: notificationTitle,
+          body: messagePreview,
+          url: '/messenger',
+          tag: `message-${messengerConversationId}`,
+        }),
+      )
 
       json(res, 201, {
         conversation: await conversationToDto(await getConversationByIdStatement.get(messengerConversationId), user),
@@ -2331,13 +2801,16 @@ const appServer = http.createServer((req, res) => {
 appServer.listen(PORT, HOST, () => {
   console.log(`API+Web server started on http://${HOST}:${PORT}`)
   console.log(`PostgreSQL database: ${dbPath}`)
+  startReminderLoop()
 })
 
 process.on('SIGINT', () => {
   console.log('\nShutting down...')
+  stopReminderLoop()
   process.exit(0)
 })
 
 process.on('SIGTERM', () => {
+  stopReminderLoop()
   process.exit(0)
 })

@@ -2,11 +2,11 @@
 
 Short, stable facts for quick context loading.
 
-- Product: PWA for shifts, reports, archive, messenger.
-- Stack: Vue 3 + Vite + Tailwind + Node http + PostgreSQL.
+- Product: PWA for shifts, reports, archive, messenger, push notifications.
+- Stack: Vue 3 + Vite + Tailwind + Node http + PostgreSQL + Web Push.
 - Prod: `restosmena.ru` on `94.198.218.48`.
 - Main deploy script: `scripts/update-production.sh`.
-- Key runtime files: `server/index.js`, `server/db.js`, `src/navigation.js`, `src/permissions.js`.
+- Key runtime files: `server/index.js`, `server/db.js`, `server/push.js`, `src/navigation.js`, `src/permissions.js`.
 - Detailed notes: Obsidian vault `Проекты/Kofeyny`.
 - Workflow rule: after each code change, commit, push, then run `/opt/kofeteriy/app/scripts/update-production.sh`; check logs only if something fails.
 

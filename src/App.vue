@@ -13,6 +13,7 @@ import ReportView from './components/ReportView.vue'
 import ProfileHomeView from './components/ProfileHomeView.vue'
 import AssortmentEditorView from './components/AssortmentEditorView.vue'
 import RoleSettingsView from './components/RoleSettingsView.vue'
+import NotificationSettingsView from './components/NotificationSettingsView.vue'
 import {
   RotateCw,
 } from 'lucide-vue-next'
@@ -92,6 +93,9 @@ const pageTitle = computed(() => {
   }
   if (activeTab.value === 'profile' && profileView.value === 'roles') {
     return 'Роли и доступ'
+  }
+  if (activeTab.value === 'profile' && profileView.value === 'notifications') {
+    return 'Уведомления'
   }
   if (activeTab.value === 'profile') return 'Профиль'
   return 'Отчет'
@@ -748,8 +752,14 @@ onBeforeUnmount(() => {
             :can-manage-products="canManageProducts"
             :can-manage-roles="canManageRoles"
             @open-assortment="profileView = 'assortment'"
+            @open-notifications="profileView = 'notifications'"
             @open-roles="profileView = 'roles'"
             @logout="logout"
+          />
+
+          <NotificationSettingsView
+            v-else-if="profileView === 'notifications'"
+            @back="profileView = 'main'"
           />
 
           <AssortmentEditorView

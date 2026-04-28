@@ -57,3 +57,49 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(cacheFirst(event.request))
 })
+
+self.addEventListener('push', (event) => {
+  const payload = (() => {
+    try {
+      return event.data?.json() || {}
+    } catch {
+      return {}
+    }
+  })()
+
+  const title = payload.title || 'Кофетерий'
+  const options = {
+    body: payload.body || '',
+    icon: payload.icon || '/icons/icon-192.png',
+    badge: payload.badge || '/icons/icon-192.png',
+    tag: payload.tag || 'kofeteriy-notification',
+    data: {
+      url: payload.url || '/',
+    },
+    renotify: Boolean(payload.renotify),
+  }
+
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const targetUrl = event.notification.data?.url || '/'
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        const clientUrl = new URL(client.url)
+        if (clientUrl.origin === self.location.origin) {
+          client.focus()
+          if (clientUrl.pathname !== targetUrl && 'navigate' in client) {
+            return client.navigate(targetUrl).then(() => client.focus())
+          }
+          return client.focus()
+        }
+      }
+
+      return self.clients.openWindow(targetUrl)
+    }),
+  )
+})

@@ -316,6 +316,45 @@ const migrations = [
         ON messages(reply_to_message_id);
     `,
   },
+  {
+    name: '009_push_notifications',
+    sql: `
+      CREATE TABLE IF NOT EXISTS notification_settings (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        push_enabled INTEGER NOT NULL DEFAULT 1,
+        messages_enabled INTEGER NOT NULL DEFAULT 1,
+        shifts_enabled INTEGER NOT NULL DEFAULT 1,
+        reminders_enabled INTEGER NOT NULL DEFAULT 1,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh_key TEXT NOT NULL,
+        auth_key TEXT NOT NULL,
+        user_agent TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_success_at TIMESTAMPTZ,
+        last_error_at TIMESTAMPTZ,
+        disabled_at TIMESTAMPTZ
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id
+        ON push_subscriptions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_push_subscriptions_active
+        ON push_subscriptions(user_id, disabled_at);
+
+      CREATE TABLE IF NOT EXISTS notification_marks (
+        dedupe_key TEXT PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+  },
 ]
 
 const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()
