@@ -38,6 +38,8 @@ Use ES modules throughout (`"type": "module"`). Follow the existing style: two-s
 
 Write code for future changes, not only for the current task. Keep components and helpers focused on one clear responsibility. If a Vue file starts mixing unrelated concerns, extract a child component or helper when it reduces real complexity. Decompose in moderation: split code enough to make ownership and behavior clear, but avoid tiny abstractions that hide simple logic. Prefer explicit props/events between components over reaching into child internals.
 
+Treat file size as a maintenance signal. Aim for files around 200 lines when practical. If a file grows past roughly 400 lines, treat that as a strong prompt to split it by responsibility unless there is a very clear reason not to.
+
 ## Project Context
 
 - Keep `PROJECT_CONTEXT.md` short and stable. It should contain only high-signal facts and pointers.

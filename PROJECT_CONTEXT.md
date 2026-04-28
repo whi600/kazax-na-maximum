@@ -9,6 +9,7 @@ Short, stable facts for quick context loading.
 - Key runtime files: `server/index.js`, `server/db.js`, `server/push.js`, `src/navigation.js`, `src/permissions.js`.
 - Detailed notes: Obsidian vault `Проекты/Kofeyny`.
 - Workflow rule: after each code change, commit, push, then run `/opt/kofeteriy/app/scripts/update-production.sh`; check logs only if something fails.
+- Decomposition rule: target files around 200 lines when practical; if a file grows past about 400 lines, split it by responsibility unless there is a clear reason not to.
 
 ## What to check after code changes
 
