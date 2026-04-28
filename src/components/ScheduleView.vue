@@ -550,6 +550,11 @@ const openModal = (date = null, isHelp = false) => {
   isModalOpen.value = true
 }
 
+const closeModal = () => {
+  showDatePicker.value = false
+  isModalOpen.value = false
+}
+
 defineExpose({
   openCreateShift: () => openModal(),
   openHelpRequest: () => openModal(null, true),
@@ -588,7 +593,7 @@ const handleSaveModal = async () => {
     })
   }
 
-  isModalOpen.value = false
+  closeModal()
 }
 
 const markForDeletion = (shift) => {
@@ -875,64 +880,100 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="isModalOpen" class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4 pt-safe">
-      <div class="bg-white w-full max-w-sm rounded-[32px] p-8 sheet-safe modal-sheet-max overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-        <div class="flex justify-between items-center mb-8">
-          <div>
-            <h3 class="text-xl font-black uppercase italic tracking-tighter">
-              {{ isExtraShift ? 'Нужна помощь' : 'Новая смена' }}
-            </h3>
-            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Заполните детали</p>
-          </div>
-          <button @click="isModalOpen = false" class="bg-slate-50 p-2 rounded-full text-slate-300">
-            <X class="w-6 h-6" />
-          </button>
-        </div>
-
-        <div class="space-y-6">
-          <div
-            class="bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer"
-            @click="showDatePicker = true"
-          >
-            <label class="text-[10px] font-black text-slate-400 uppercase mb-2 block">Выберите дату</label>
-            <p class="text-sm font-bold text-slate-800">{{ formatDateInput(form.date) }}</p>
-          </div>
-          <div class="flex gap-4">
-            <div
-              class="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer"
-              @click="openPicker(startTimeInput)"
-            >
-              <label class="text-[10px] font-black text-slate-400 uppercase mb-2 block text-center">Начало</label>
-              <input
-                ref="startTimeInput"
-                type="time"
-                v-model="form.start_time"
-                class="w-full bg-transparent border-none p-0 text-sm font-bold text-center outline-none cursor-pointer"
-              />
+    <Teleport to="body">
+      <div
+        v-if="isModalOpen"
+        class="fixed inset-0 z-[130] bg-slate-50/98 backdrop-blur-sm"
+      >
+        <div class="flex h-full min-h-[100dvh] flex-col">
+          <div class="flex items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/95 px-4 pb-3 pt-safe">
+            <div class="min-w-0">
+              <p class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                {{ isExtraShift ? 'Заявка на помощь' : 'Создание смены' }}
+              </p>
+              <h3 class="truncate text-xl font-black uppercase italic tracking-tighter text-slate-900">
+                {{ isExtraShift ? 'Нужна помощь' : 'Новая смена' }}
+              </h3>
             </div>
-            <div
-              class="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer"
-              @click="openPicker(endTimeInput)"
-            >
-              <label class="text-[10px] font-black text-slate-400 uppercase mb-2 block text-center">Конец</label>
-              <input
-                ref="endTimeInput"
-                type="time"
-                v-model="form.end_time"
-                class="w-full bg-transparent border-none p-0 text-sm font-bold text-center outline-none cursor-pointer"
-              />
+            <button @click="closeModal" class="rounded-full bg-white p-2 text-slate-400 shadow-sm">
+              <X class="w-6 h-6" />
+            </button>
+          </div>
+
+          <div class="flex-1 overflow-y-auto px-4 py-5">
+            <div class="mx-auto flex min-h-full w-full max-w-md flex-col justify-center">
+              <div class="rounded-[30px] border border-slate-100 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.08)]">
+                <p class="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  Заполните детали
+                </p>
+
+                <div class="space-y-4">
+                  <button
+                    type="button"
+                    class="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 text-left transition-colors active:bg-slate-100"
+                    @click="showDatePicker = true"
+                  >
+                    <span class="mb-2 block text-[10px] font-black uppercase text-slate-400">Выберите дату</span>
+                    <span class="block text-base font-bold text-slate-900">{{ formatDateInput(form.date) }}</span>
+                  </button>
+
+                  <div class="grid grid-cols-2 gap-4">
+                    <div
+                      class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
+                      @click="openPicker(startTimeInput)"
+                    >
+                      <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Начало</label>
+                      <input
+                        ref="startTimeInput"
+                        type="time"
+                        v-model="form.start_time"
+                        class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"
+                      />
+                    </div>
+                    <div
+                      class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
+                      @click="openPicker(endTimeInput)"
+                    >
+                      <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Конец</label>
+                      <input
+                        ref="endTimeInput"
+                        type="time"
+                        v-model="form.end_time"
+                        class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="h-6 shrink-0" />
+            </div>
+          </div>
+
+          <div class="border-t border-slate-100 bg-white px-4 pb-[calc(1rem+var(--app-safe-bottom,env(safe-area-inset-bottom)))] pt-3">
+            <div class="mx-auto flex w-full max-w-md gap-3">
+              <div
+                class="flex-1"
+              >
+                <button
+                  type="button"
+                  @click="closeModal"
+                  class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-[11px] font-black uppercase text-slate-500 transition-colors active:bg-slate-100"
+                >
+                  Отмена
+                </button>
+              </div>
+              <button
+                @click="handleSaveModal"
+                class="flex-[1.35] rounded-2xl bg-blue-600 px-4 py-4 text-[11px] font-black uppercase text-white shadow-xl shadow-blue-200 transition-all active:scale-[0.99]"
+              >
+                {{ isExtraShift ? 'Отправить заявку' : 'Добавить в черновик' }}
+              </button>
             </div>
           </div>
         </div>
-
-        <button
-          @click="handleSaveModal"
-          class="w-full bg-blue-600 text-white py-5 rounded-2xl font-black uppercase text-[11px] mt-10 shadow-xl shadow-blue-200 active:scale-95 transition-all"
-        >
-          {{ isExtraShift ? 'Отправить заявку' : 'Добавить в черновик' }}
-        </button>
       </div>
-    </div>
+    </Teleport>
 
     <DatePickerSheet
       v-if="showDatePicker"
