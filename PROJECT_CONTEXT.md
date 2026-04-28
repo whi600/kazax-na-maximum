@@ -8,6 +8,7 @@ Short, stable facts for quick context loading.
 - Main deploy script: `scripts/update-production.sh`.
 - Key runtime files: `server/index.js`, `server/db.js`, `src/navigation.js`, `src/permissions.js`.
 - Detailed notes: Obsidian vault `Проекты/Kofeyny`.
+- Workflow rule: after each code change, commit, push, then run `/opt/kofeteriy/app/scripts/update-production.sh`; check logs only if something fails.
 
 ## What to check after code changes
 

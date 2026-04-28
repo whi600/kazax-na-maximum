@@ -44,6 +44,12 @@ Write code for future changes, not only for the current task. Keep components an
 - When code changes, update the matching Obsidian note first, then refresh `PROJECT_CONTEXT.md` if the short summary changed.
 - Use the Obsidian vault at `/home/mihail/Документы/Obsidian Vault/Проекты/Kofeyny` as the detailed source of truth.
 
+## Deploy Routine
+
+- After every code change, commit the work, push it to GitHub, and run `/opt/kofeteriy/app/scripts/update-production.sh` on the server.
+- Do not inspect deploy logs unless the push or deploy fails. Use logs only as a fallback for failures, not as routine context.
+- Keep the deploy path consistent so production always reflects the latest pushed state.
+
 ## Testing Guidelines
 
 No automated test framework is configured yet. Before submitting changes, run `npm run build` and manually verify the affected flow through the Vite app and API. If tests are added, prefer colocated component tests under `src/components/__tests__/` and backend route tests under `server/__tests__/`, using filenames like `AuthView.test.js`.
