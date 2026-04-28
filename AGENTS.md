@@ -38,6 +38,12 @@ Use ES modules throughout (`"type": "module"`). Follow the existing style: two-s
 
 Write code for future changes, not only for the current task. Keep components and helpers focused on one clear responsibility. If a Vue file starts mixing unrelated concerns, extract a child component or helper when it reduces real complexity. Decompose in moderation: split code enough to make ownership and behavior clear, but avoid tiny abstractions that hide simple logic. Prefer explicit props/events between components over reaching into child internals.
 
+## Project Context
+
+- Keep `PROJECT_CONTEXT.md` short and stable. It should contain only high-signal facts and pointers.
+- When code changes, update the matching Obsidian note first, then refresh `PROJECT_CONTEXT.md` if the short summary changed.
+- Use the Obsidian vault at `/home/mihail/Документы/Obsidian Vault/Проекты/Kofeyny` as the detailed source of truth.
+
 ## Testing Guidelines
 
 No automated test framework is configured yet. Before submitting changes, run `npm run build` and manually verify the affected flow through the Vite app and API. If tests are added, prefer colocated component tests under `src/components/__tests__/` and backend route tests under `server/__tests__/`, using filenames like `AuthView.test.js`.
