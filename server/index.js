@@ -984,6 +984,14 @@ const normalizeRole = (value) => {
 }
 
 const getToday = () => new Date().toISOString().slice(0, 10)
+const getCurrentWeekStartDate = () => {
+  const today = new Date()
+  const day = today.getDay() || 7
+  const monday = new Date(today)
+  monday.setHours(0, 0, 0, 0)
+  monday.setDate(today.getDate() - (day - 1))
+  return monday.toISOString().slice(0, 10)
+}
 const isValidShiftRange = (startTime, endTime) =>
   Boolean(startTime && endTime && startTime < endTime)
 const REMINDER_WINDOWS = [
@@ -1788,7 +1796,7 @@ const appServer = http.createServer((req, res) => {
       const user = await requireUser(req, res)
       if (!user) return
 
-      const rows = await listUpcomingShiftsStatement.all(getToday())
+      const rows = await listUpcomingShiftsStatement.all(getCurrentWeekStartDate())
       json(res, 200, { shifts: rows.map(toShiftDto) })
       return
     }

@@ -420,6 +420,7 @@ const selectedWeekDays = computed(() => {
 
     return {
       date,
+      isPast: isPastDate(date),
       shifts: dayShifts,
       occupiedCount,
       openCount: dayShifts.length - occupiedCount,
@@ -870,27 +871,52 @@ onBeforeUnmount(() => {
           <div v-for="(day, dayIndex) in selectedWeekDays" :key="day.date" class="day-card">
             <div class="flex items-center justify-between mb-3 ml-1">
               <div>
-                <h3 class="text-[11px] font-black text-blue-600 uppercase tracking-widest">{{ formatDateHeader(day.date) }}</h3>
+                <h3
+                  class="text-[11px] font-black uppercase tracking-widest"
+                  :class="day.isPast ? 'text-slate-300' : 'text-blue-600'"
+                >
+                  {{ formatDateHeader(day.date) }}
+                </h3>
               </div>
             </div>
 
-            <div v-if="day.shifts.length === 0" class="bg-white/70 border border-dashed border-slate-100 rounded-lg p-4 text-center">
-              <p class="text-[10px] font-black uppercase text-slate-300">{{ formatWeekDay(day.date) }} свободен</p>
+            <div
+              v-if="day.shifts.length === 0"
+              class="border border-dashed rounded-lg p-4 text-center"
+              :class="day.isPast ? 'bg-slate-100/70 border-slate-200' : 'bg-white/70 border-slate-100'"
+            >
+              <p
+                class="text-[10px] font-black uppercase"
+                :class="day.isPast ? 'text-slate-300' : 'text-slate-300'"
+              >
+                {{ formatWeekDay(day.date) }} свободен
+              </p>
             </div>
 
             <TransitionGroup name="shift-card" appear tag="div" class="space-y-2">
               <div
                 v-for="(shift, shiftIndex) in day.shifts"
                 :key="shift.id"
-                class="bg-white p-3.5 rounded-lg border border-slate-100 shadow-sm flex items-center justify-between transition-all"
-                :class="{ 'opacity-50': isPastDate(shift.date) }"
+                class="p-3.5 rounded-lg border shadow-sm flex items-center justify-between transition-all"
+                :class="
+                  day.isPast
+                    ? 'bg-slate-100 border-slate-200 opacity-70'
+                    : 'bg-white border-slate-100'
+                "
                 :style="{
                   '--day-delay': `${dayIndex * 80}ms`,
                   '--shift-delay': `${shiftIndex * 70}ms`,
                 }"
               >
                 <div class="flex items-center gap-2">
-                  <span class="text-[12px] font-black bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-slate-800">
+                  <span
+                    class="text-[12px] font-black px-2 py-1.5 rounded-lg border"
+                    :class="
+                      day.isPast
+                        ? 'bg-slate-200/80 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-100 text-slate-800'
+                    "
+                  >
                     {{ shift.start_time }}–{{ shift.end_time }}
                   </span>
                   <span v-if="shift.id < 0" class="text-[8px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase">
@@ -901,11 +927,21 @@ onBeforeUnmount(() => {
                 <div class="flex items-center gap-3">
                   <div
                     v-if="shift.employee_name"
-                    class="flex items-center gap-2 bg-blue-50/50 px-3 py-1.5 rounded-lg border border-blue-100/50"
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg border"
+                    :class="
+                      day.isPast
+                        ? 'bg-slate-200/60 border-slate-200 text-slate-500'
+                        : 'bg-blue-50/50 border-blue-100/50'
+                    "
                   >
-                    <span class="text-[11px] font-black text-blue-600">{{ shift.employee_name }}</span>
+                    <span
+                      class="text-[11px] font-black"
+                      :class="day.isPast ? 'text-slate-500' : 'text-blue-600'"
+                    >
+                      {{ shift.employee_name }}
+                    </span>
                     <button
-                      v-if="canManageSchedule || canSelfCancelBooking(shift)"
+                      v-if="!day.isPast && (canManageSchedule || canSelfCancelBooking(shift))"
                       @click="cancelBooking(shift)"
                       class="text-red-500 p-0.5 hover:bg-white rounded-md transition-colors"
                     >
@@ -914,7 +950,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <button
-                    v-else-if="!isPastDate(shift.date)"
+                    v-else-if="!day.isPast"
                     @click="bookShift(shift)"
                     class="bg-slate-800 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md active:scale-95 transition-all"
                   >
@@ -922,7 +958,7 @@ onBeforeUnmount(() => {
                   </button>
 
                   <button
-                    v-if="canManageSchedule"
+                    v-if="canManageSchedule && !day.isPast"
                     @click="openEditModal(shift)"
                     class="text-slate-300 hover:text-blue-600 transition-colors"
                     aria-label="Редактировать смену"
@@ -931,7 +967,7 @@ onBeforeUnmount(() => {
                   </button>
 
                   <button
-                    v-if="canManageSchedule"
+                    v-if="canManageSchedule && !day.isPast"
                     @click="markForDeletion(shift)"
                     class="text-slate-200 hover:text-red-500 transition-colors"
                   >
