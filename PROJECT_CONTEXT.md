@@ -4,7 +4,7 @@ Short, stable facts for quick context loading.
 
 - Product: PWA for shifts, reports, archive, messenger, push notifications.
 - Stack: Vue 3 + Vite + Tailwind + Node http + PostgreSQL + Web Push.
-- Prod: `http://194.67.121.51` on server `194.67.121.51`. `restosmena.ru` must be repointed before HTTPS/domain setup.
+- Prod: `https://restosmena.ru` on server `194.67.121.51`.
 - Main deploy script: `scripts/update-production.sh`.
 - Key runtime files: `server/index.js`, `server/auth.js`, `server/db.js`, `server/notifications.js`, `server/push.js`, `src/navigation.js`, `src/permissions.js`.
 - Detailed notes: Obsidian vault `Проекты/Kofeyny`.
