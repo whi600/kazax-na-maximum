@@ -929,9 +929,10 @@ onBeforeUnmount(() => {
                     <button
                       v-if="!day.isPast && (canManageSchedule || canSelfCancelBooking(shift))"
                       @click="cancelBooking(shift)"
-                      class="text-red-500 p-0.5 hover:bg-white rounded-md transition-colors"
+                      class="flex h-6 w-6 items-center justify-center rounded-md border border-red-100 bg-red-50 text-red-500 transition-colors hover:bg-red-100"
+                      aria-label="Снять сотрудника со смены"
                     >
-                      <X class="w-3.5 h-3.5" />
+                      <X class="w-4 h-4" />
                     </button>
                   </div>
 
@@ -955,7 +956,8 @@ onBeforeUnmount(() => {
                   <button
                     v-if="canManageSchedule && !day.isPast"
                     @click="markForDeletion(shift)"
-                    class="text-slate-200 hover:text-red-500 transition-colors"
+                    class="flex h-8 w-8 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-red-500 shadow-sm transition-colors hover:bg-red-100 hover:text-red-600"
+                    aria-label="Удалить смену"
                   >
                     <Trash2 class="w-4 h-4" />
                   </button>
