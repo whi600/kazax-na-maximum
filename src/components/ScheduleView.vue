@@ -24,6 +24,7 @@ import {
   Bell,
   Plus,
   Pencil,
+  X,
 } from 'lucide-vue-next'
 import SchedulePendingRequestsSheet from './SchedulePendingRequestsSheet.vue'
 import ScheduleShiftModal from './ScheduleShiftModal.vue'
@@ -929,10 +930,10 @@ onBeforeUnmount(() => {
                     <button
                       v-if="!day.isPast && (canManageSchedule || canSelfCancelBooking(shift))"
                       @click="cancelBooking(shift)"
-                      class="flex h-7 w-7 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-600 transition-colors hover:bg-red-100"
+                      class="p-0.5 text-red-500 transition-colors hover:bg-white rounded-md"
                       aria-label="Снять сотрудника со смены"
                     >
-                      <X class="h-4 w-4 stroke-[2.75]" />
+                      <X class="h-3.5 w-3.5" />
                     </button>
                   </div>
 
@@ -956,10 +957,10 @@ onBeforeUnmount(() => {
                   <button
                     v-if="canManageSchedule && !day.isPast"
                     @click="markForDeletion(shift)"
-                    class="flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600 shadow-sm transition-colors hover:bg-red-100 hover:text-red-700"
+                    class="text-slate-200 transition-colors hover:text-red-500"
                     aria-label="Удалить смену"
                   >
-                    <Trash2 class="h-4 w-4 stroke-[2.5]" />
+                    <Trash2 class="h-4 w-4" />
                   </button>
                 </div>
               </div>
