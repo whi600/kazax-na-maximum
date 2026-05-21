@@ -296,6 +296,18 @@ const migrations = [
       );
     `,
   },
+  {
+    name: '010_remove_messenger',
+    sql: `
+      DROP TABLE IF EXISTS message_attachments CASCADE;
+      DROP TABLE IF EXISTS messages CASCADE;
+      DROP TABLE IF EXISTS conversation_members CASCADE;
+      DROP TABLE IF EXISTS conversations CASCADE;
+
+      ALTER TABLE notification_settings
+        DROP COLUMN IF EXISTS messages_enabled;
+    `,
+  },
 ]
 
 const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()
