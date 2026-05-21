@@ -74,9 +74,8 @@ let structureAutosaveTimer = null
 let suppressStructureAutosave = false
 let tempShiftSeq = 0
 const DEFAULT_WEEKS_BOOTSTRAP_KEY = 'kofeyny:default-weeks-bootstrap:v1'
-const weekTapTarget = ref('')
-const weekTapCount = ref(0)
-let weekTapTimer = null
+const weekHoldTriggered = ref(false)
+let weekHoldTimer = null
 let schedulePresenceTimer = null
 
 const form = ref({ date: '', start_time: '09:00', end_time: '18:00' })
@@ -436,29 +435,30 @@ const selectWeek = (weekStart) => {
 }
 
 const onWeekTabClick = (weekStart) => {
-  selectWeek(weekStart)
-
-  if (!canManageSchedule.value) return
-
-  if (weekTapTimer) clearTimeout(weekTapTimer)
-  if (weekTapTarget.value === weekStart) {
-    weekTapCount.value += 1
-  } else {
-    weekTapTarget.value = weekStart
-    weekTapCount.value = 1
-  }
-
-  if (weekTapCount.value >= 3) {
-    weekTapTarget.value = ''
-    weekTapCount.value = 0
-    deleteWeek(weekStart)
+  if (weekHoldTriggered.value) {
+    weekHoldTriggered.value = false
     return
   }
 
-  weekTapTimer = setTimeout(() => {
-    weekTapTarget.value = ''
-    weekTapCount.value = 0
-  }, 550)
+  selectWeek(weekStart)
+}
+
+const cancelWeekHold = () => {
+  if (!weekHoldTimer) return
+  clearTimeout(weekHoldTimer)
+  weekHoldTimer = null
+}
+
+const startWeekHold = (weekStart) => {
+  if (!canManageSchedule.value) return
+
+  cancelWeekHold()
+  weekHoldTriggered.value = false
+  weekHoldTimer = setTimeout(() => {
+    weekHoldTimer = null
+    weekHoldTriggered.value = true
+    deleteWeek(weekStart)
+  }, 650)
 }
 
 const deleteWeek = (weekStart) => {
@@ -788,7 +788,7 @@ watch(
 onBeforeUnmount(() => {
   if (structureAutosaveTimer) clearTimeout(structureAutosaveTimer)
   if (structureStatusHideTimer) clearTimeout(structureStatusHideTimer)
-  if (weekTapTimer) clearTimeout(weekTapTimer)
+  cancelWeekHold()
   stopSchedulePresence()
   unlockPageScroll()
 })
@@ -816,6 +816,11 @@ onBeforeUnmount(() => {
               v-for="weekStart in weekStarts"
               :key="weekStart"
               @click="onWeekTabClick(weekStart)"
+              @pointerdown="startWeekHold(weekStart)"
+              @pointerup="cancelWeekHold"
+              @pointerleave="cancelWeekHold"
+              @pointercancel="cancelWeekHold"
+              @contextmenu.prevent
               class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all"
               :class="
                 weekStart === selectedWeekStart
