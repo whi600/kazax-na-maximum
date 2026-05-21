@@ -52,7 +52,7 @@ const showPendingSheet = ref(false)
 const showDatePicker = ref(false)
 const selectedWeekStart = ref('')
 
-const pendingDeletes = ref(new Set())
+const pendingDeleteIds = ref([])
 const unsavedNewShifts = ref([])
 const isSaving = ref(false)
 const structureSaveStatus = ref('idle')
@@ -335,7 +335,7 @@ const fetchShifts = async () => {
       selectedWeekStart.value = currentWeekStart
     }
 
-    pendingDeletes.value.clear()
+      pendingDeleteIds.value = []
     unsavedNewShifts.value = []
   } catch (error) {
     safeAlert(error?.message || 'Ошибка загрузки смен')
@@ -356,7 +356,7 @@ const approvedShifts = computed(() => {
     ...shifts.value.filter(
       (shift) =>
         (shift.status || 'approved') === 'approved' &&
-        !pendingDeletes.value.has(shift.id),
+        !pendingDeleteIds.value.includes(shift.id),
     ),
     ...unsavedNewShifts.value,
   ]
@@ -482,7 +482,9 @@ const deleteWeek = (weekStart) => {
 
     approvedShifts.value.forEach((shift) => {
       if (weekDateSet.has(shift.date) && shift.id > 0) {
-        pendingDeletes.value.add(shift.id)
+        if (!pendingDeleteIds.value.includes(shift.id)) {
+          pendingDeleteIds.value = [...pendingDeleteIds.value, shift.id]
+        }
       }
     })
 
@@ -664,7 +666,9 @@ const markForDeletion = (shift) => {
         (item) => item.id !== shift.id,
       )
     } else {
-      pendingDeletes.value.add(shift.id)
+      if (!pendingDeleteIds.value.includes(shift.id)) {
+        pendingDeleteIds.value = [...pendingDeleteIds.value, shift.id]
+      }
     }
   })
 }
@@ -690,7 +694,7 @@ const rejectRequest = async (shiftId) => {
 }
 
 const hasStructureChanges = computed(
-  () => unsavedNewShifts.value.length > 0 || pendingDeletes.value.size > 0,
+  () => unsavedNewShifts.value.length > 0 || pendingDeleteIds.value.length > 0,
 )
 
 const saveStructure = async ({ silent = false } = {}) => {
@@ -700,7 +704,7 @@ const saveStructure = async ({ silent = false } = {}) => {
 
   try {
     await shiftsApi.bulkSave({
-      deletedIds: Array.from(pendingDeletes.value),
+      deletedIds: [...pendingDeleteIds.value],
       newShifts: unsavedNewShifts.value.map(({ date, start_time, end_time }) => ({
         date,
         start_time,
@@ -750,7 +754,7 @@ watch(
 )
 
 watch(
-  [unsavedNewShifts, () => pendingDeletes.value.size],
+  [unsavedNewShifts, () => pendingDeleteIds.value.length],
   () => {
     if (!canManageSchedule.value) return
     if (suppressStructureAutosave) return
