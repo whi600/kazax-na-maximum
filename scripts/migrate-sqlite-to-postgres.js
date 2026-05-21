@@ -91,10 +91,6 @@ const resetSequence = async (client, table) => {
 const truncateTarget = async (client) => {
   await client.query(`
     TRUNCATE TABLE
-      message_attachments,
-      messages,
-      conversation_members,
-      conversations,
       role_permissions,
       resource_state,
       editing_presence,
@@ -194,50 +190,10 @@ const tables = [
     ],
     conflict: ['role'],
   },
-  {
-    name: 'conversations',
-    columns: [
-      'id',
-      'type',
-      'title',
-      'direct_key',
-      'created_by',
-      'created_at',
-      'updated_at',
-    ],
-    conflict: ['id'],
-  },
-  {
-    name: 'conversation_members',
-    columns: ['conversation_id', 'user_id', 'joined_at', 'last_read_at'],
-    conflict: ['conversation_id', 'user_id'],
-  },
-  {
-    name: 'messages',
-    columns: [
-      'id',
-      'conversation_id',
-      'sender_user_id',
-      'body',
-      'reply_to_message_id',
-      'created_at',
-    ],
-    conflict: ['id'],
-  },
-  {
-    name: 'message_attachments',
-    columns: [
-      'id',
-      'message_id',
-      'original_name',
-      'stored_name',
-      'mime_type',
-      'size',
-      'storage_path',
-      'created_at',
-    ],
-    conflict: ['id'],
-  },
+
+
+
+
 ]
 
 console.log(`Migrating SQLite data from ${sqlitePath}`)

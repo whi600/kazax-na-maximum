@@ -34,15 +34,6 @@ defineProps({
   </svg>
 
   <svg
-    v-else-if="name === 'messages'"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden="true"
-  >
-    <path d="M4.5 5.5A3.5 3.5 0 0 1 8 2h8a3.5 3.5 0 0 1 3.5 3.5v6A3.5 3.5 0 0 1 16 15h-4.7l-3.94 3.28A1.15 1.15 0 0 1 5.5 17.4V15H8a1 1 0 1 0 0-2H5.5v-7.5Zm4 1.5a1 1 0 1 0 0 2h7a1 1 0 1 0 0-2h-7Zm0 3.75a1 1 0 1 0 0 2h4.75a1 1 0 1 0 0-2H8.5Z" />
-  </svg>
-
-  <svg
     v-else
     viewBox="0 0 24 24"
     fill="currentColor"

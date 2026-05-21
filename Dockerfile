@@ -24,7 +24,7 @@ COPY scripts ./scripts
 COPY --from=build /app/dist ./dist
 COPY docker/entrypoint.sh /entrypoint.sh
 
-RUN mkdir -p /app/data/uploads \
+RUN mkdir -p /app/data \
   && chmod +x /entrypoint.sh
 
 EXPOSE 8787

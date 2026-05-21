@@ -1,9 +1,8 @@
-export const defaultTab = 'messenger'
+export const defaultTab = 'main'
 
 export const tabRoutes = {
   main: '/report',
   schedule: '/schedule',
-  messenger: '/messages',
   archive: '/archive',
   profile: '/profile',
 }
@@ -27,7 +26,6 @@ export const buildNavItems = (canAccessArchive) => {
   const items = [
     { tab: 'main', label: 'Отчет', icon: 'report' },
     { tab: 'schedule', label: 'График', icon: 'schedule' },
-    { tab: 'messenger', label: 'Сообщения', icon: 'messages' },
   ]
 
   if (canAccessArchive) {

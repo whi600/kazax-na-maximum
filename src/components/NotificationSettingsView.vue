@@ -13,7 +13,6 @@ import {
   ArrowLeft,
   BellRing,
   CalendarClock,
-  MessageSquareMore,
   Send,
   Smartphone,
 } from 'lucide-vue-next'
@@ -31,7 +30,6 @@ const permission = ref(getNotificationPermission())
 const subscribed = ref(false)
 const settings = ref({
   push_enabled: true,
-  messages_enabled: true,
   shifts_enabled: true,
   reminders_enabled: true,
 })
@@ -85,7 +83,6 @@ const loadSettings = async () => {
     pushAvailable.value = Boolean(response.pushAvailable)
     settings.value = {
       push_enabled: Boolean(response.settings?.push_enabled),
-      messages_enabled: Boolean(response.settings?.messages_enabled),
       shifts_enabled: Boolean(response.settings?.shifts_enabled),
       reminders_enabled: Boolean(response.settings?.reminders_enabled),
     }
@@ -121,7 +118,6 @@ const saveSettings = async (patch) => {
     const response = await notificationsApi.updateSettings(patch)
     settings.value = {
       push_enabled: Boolean(response.settings?.push_enabled),
-      messages_enabled: Boolean(response.settings?.messages_enabled),
       shifts_enabled: Boolean(response.settings?.shifts_enabled),
       reminders_enabled: Boolean(response.settings?.reminders_enabled),
     }
@@ -212,7 +208,7 @@ onMounted(loadSettings)
           <div class="min-w-0 flex-1">
             <h2 class="text-lg font-black text-slate-800">Уведомления</h2>
             <p class="text-[11px] font-bold text-slate-400">
-              Сообщения, смены и напоминания на этом устройстве
+              Смены и напоминания на этом устройстве
             </p>
           </div>
         </div>
@@ -278,25 +274,6 @@ onMounted(loadSettings)
           </span>
           <span class="text-[10px] font-black uppercase" :class="settings.push_enabled ? 'text-blue-600' : 'text-slate-400'">
             {{ settings.push_enabled ? 'Вкл' : 'Выкл' }}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          @click="saveSettings({ messages_enabled: !settings.messages_enabled })"
-          :disabled="saving || categoryDisabled"
-          class="w-full flex items-center justify-between rounded-lg border px-3 py-3 text-left transition-all disabled:opacity-50"
-          :class="settings.messages_enabled ? 'border-blue-100 bg-blue-50' : 'border-slate-100 bg-slate-50'"
-        >
-          <span class="flex items-center gap-3">
-            <MessageSquareMore class="w-4 h-4 text-slate-500" />
-            <span>
-              <span class="block text-[11px] font-black uppercase text-slate-800">Сообщения</span>
-              <span class="block text-[10px] font-bold text-slate-400">Личные и групповые чаты</span>
-            </span>
-          </span>
-          <span class="text-[10px] font-black uppercase" :class="settings.messages_enabled ? 'text-blue-600' : 'text-slate-400'">
-            {{ settings.messages_enabled ? 'Вкл' : 'Выкл' }}
           </span>
         </button>
 

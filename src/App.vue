@@ -10,7 +10,6 @@ import {
 import AdminArchive from './components/AdminArchive.vue'
 import ScheduleView from './components/ScheduleView.vue'
 import AuthView from './components/AuthView.vue'
-import MessengerView from './components/MessengerView.vue'
 import AppHeader from './components/AppHeader.vue'
 import AppBottomNav from './components/AppBottomNav.vue'
 import ReportView from './components/ReportView.vue'
@@ -36,10 +35,6 @@ if (typeof window !== 'undefined') {
 
 const activeTab = ref(getTabFromLocation())
 const scheduleViewRef = ref(null)
-const messengerViewRef = ref(null)
-const messengerSearchOpen = ref(false)
-const messengerSearchQuery = ref('')
-const messengerChatOpen = ref(false)
 const schedulePendingCount = ref(0)
 const products = ref([])
 const dailyEntries = ref([])
@@ -91,7 +86,6 @@ const canAccessArchive = computed(
 
 const pageTitle = computed(() => {
   if (activeTab.value === 'schedule') return 'График'
-  if (activeTab.value === 'messenger') return 'Сообщения'
   if (activeTab.value === 'archive') return 'Архив'
   if (activeTab.value === 'profile' && profileView.value === 'assortment') {
     return 'Ассортимент'
@@ -121,7 +115,6 @@ const updateRoute = (tab, replace = false) => {
 const navigateTo = (tab, replace = false) => {
   const nextTab = tab === 'archive' && !canAccessArchive.value ? 'main' : tab
   activeTab.value = nextTab
-  if (nextTab !== 'messenger') messengerChatOpen.value = false
   if (nextTab !== 'profile') profileView.value = 'main'
   updateRoute(nextTab, replace)
 }
@@ -649,19 +642,6 @@ const openScheduleRequests = () => {
   scheduleViewRef.value?.openPendingRequests()
 }
 
-const openMessengerSearch = () => {
-  messengerSearchOpen.value = true
-  messengerSearchQuery.value = ''
-  messengerViewRef.value?.closeConversation?.()
-  messengerViewRef.value?.openPeoplePanel?.()
-}
-
-const closeMessengerSearch = () => {
-  messengerSearchOpen.value = false
-  messengerSearchQuery.value = ''
-  messengerViewRef.value?.closePeoplePanel?.()
-}
-
 const closeKeyboard = (event) => {
   const targetTag = event.target?.tagName
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(targetTag)) return
@@ -674,12 +654,6 @@ const closeKeyboard = (event) => {
 watch(canAccessArchive, (allowed) => {
   if (activeTab.value === 'archive' && !allowed) {
     navigateTo('main', true)
-  }
-})
-
-watch(activeTab, (tab) => {
-  if (tab !== 'messenger') {
-    closeMessengerSearch()
   }
 })
 
@@ -753,17 +727,12 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <AppHeader
-        v-if="activeTab !== 'profile' && !(activeTab === 'messenger' && messengerChatOpen)"
-        v-model:messenger-search-query="messengerSearchQuery"
+        v-if="activeTab !== 'profile'"
         :active-tab="activeTab"
         :page-title="pageTitle"
         :user-role="userRole"
         :can-manage-schedule="canManageSchedule"
         :schedule-pending-count="schedulePendingCount"
-        :messenger-search-open="messengerSearchOpen"
-        @open-messenger-search="openMessengerSearch"
-        @close-messenger-search="closeMessengerSearch"
-        @open-group-sheet="messengerViewRef?.openGroupSheet('create')"
         @open-schedule-requests="openScheduleRequests"
         @open-schedule-action="openScheduleAction"
       />
@@ -840,16 +809,6 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div v-else-if="activeTab === 'messenger'" class="page-fade">
-          <MessengerView
-            ref="messengerViewRef"
-            :currentUser="currentUser"
-            :people-search-query="messengerSearchQuery"
-            @person-selected="closeMessengerSearch"
-            @chat-open-change="messengerChatOpen = $event"
-          />
-        </div>
-
         <div v-else>
           <div v-if="activeTab === 'archive' && canAccessArchive" class="page-fade">
             <AdminArchive
@@ -871,7 +830,7 @@ onBeforeUnmount(() => {
       </main>
 
       <AppBottomNav
-        v-if="userRole && !(activeTab === 'messenger' && messengerChatOpen)"
+        v-if="userRole"
         :active-tab="activeTab"
         :items="navItems"
         @navigate="navigateTo"
@@ -1061,27 +1020,6 @@ textarea {
   }
 }
 
-.messenger-search-enter-active,
-.messenger-search-leave-active {
-  transition:
-    opacity 180ms ease,
-    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.messenger-search-enter-from,
-.messenger-search-leave-to {
-  opacity: 0;
-  transform: scaleX(0.16);
-}
-
-.messenger-search-enter-to,
-.messenger-search-leave-from {
-  opacity: 1;
-  transform: scaleX(1);
-}
-
-.messenger-actions-enter-active,
-.messenger-actions-leave-active,
 .header-title-enter-active,
 .header-title-leave-active,
 .header-actions-enter-active,
@@ -1089,18 +1027,6 @@ textarea {
   transition:
     opacity 160ms ease,
     transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.messenger-actions-enter-from,
-.messenger-actions-leave-to {
-  opacity: 0;
-  transform: translateX(8px);
-}
-
-.messenger-actions-enter-to,
-.messenger-actions-leave-from {
-  opacity: 1;
-  transform: translate(0);
 }
 
 .header-title-enter-from,

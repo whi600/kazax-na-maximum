@@ -1,11 +1,8 @@
 const apiRequest = async (path, options = {}) => {
-  const isFormData =
-    typeof FormData !== 'undefined' && options.body instanceof FormData
-
   const response = await fetch(path, {
     credentials: 'include',
     headers: {
-      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      'Content-Type': 'application/json',
       ...(options.headers || {}),
     },
     ...options,
@@ -138,47 +135,4 @@ export const notificationsApi = {
       body: JSON.stringify({ endpoint }),
     }),
   test: () => apiRequest('/api/notifications/test', { method: 'POST' }),
-}
-
-export const messengerApi = {
-  users: () => apiRequest('/api/messenger/users', { method: 'GET' }),
-  conversations: () =>
-    apiRequest('/api/messenger/conversations', { method: 'GET' }),
-  startDirect: (userId) =>
-    apiRequest('/api/messenger/conversations/direct', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    }),
-  createGroup: ({ title, memberIds }) =>
-    apiRequest('/api/messenger/conversations/group', {
-      method: 'POST',
-      body: JSON.stringify({ title, memberIds }),
-    }),
-  addMembers: (conversationId, memberIds) =>
-    apiRequest(`/api/messenger/conversations/${conversationId}/members`, {
-      method: 'POST',
-      body: JSON.stringify({ memberIds }),
-    }),
-  messages: (conversationId, limit = 100) =>
-    apiRequest(
-      `/api/messenger/conversations/${conversationId}/messages?limit=${limit}`,
-      { method: 'GET' },
-    ),
-  sendMessage: (conversationId, { body = '', file = null, replyToMessageId = null } = {}) => {
-    if (file) {
-      const formData = new FormData()
-      formData.append('body', body)
-      if (replyToMessageId) formData.append('replyToMessageId', replyToMessageId)
-      formData.append('attachment', file)
-      return apiRequest(`/api/messenger/conversations/${conversationId}/messages`, {
-        method: 'POST',
-        body: formData,
-      })
-    }
-
-    return apiRequest(`/api/messenger/conversations/${conversationId}/messages`, {
-      method: 'POST',
-      body: JSON.stringify({ body, replyToMessageId }),
-    })
-  },
 }

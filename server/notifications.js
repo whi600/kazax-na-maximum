@@ -23,7 +23,6 @@ const getToday = () => new Date().toISOString().slice(0, 10)
 
 export const mapNotificationSettings = (row) => ({
   push_enabled: toBoolInt(row?.push_enabled, 1) === 1,
-  messages_enabled: toBoolInt(row?.messages_enabled, 1) === 1,
   shifts_enabled: toBoolInt(row?.shifts_enabled, 1) === 1,
   reminders_enabled: toBoolInt(row?.reminders_enabled, 1) === 1,
   updated_at: row?.updated_at || null,
@@ -32,7 +31,7 @@ export const mapNotificationSettings = (row) => ({
 export const ensureNotificationSettings = async (userId) => {
   let row = await getNotificationSettingsStatement.get(userId)
   if (!row) {
-    await upsertNotificationSettingsStatement.run(userId, 1, 1, 1, 1)
+    await upsertNotificationSettingsStatement.run(userId, 1, 1, 1)
     row = await getNotificationSettingsStatement.get(userId)
   }
   return mapNotificationSettings(row)
@@ -63,12 +62,7 @@ const filterSubscriptionsBySettings = async (userIds, kind) => {
   const rows = await listPushSubscriptionsByUserIdsStatement.all(uniqueIds)
   if (rows.length === 0) return []
 
-  const column =
-    kind === 'messages'
-      ? 'messages_enabled'
-      : kind === 'reminders'
-        ? 'reminders_enabled'
-        : 'shifts_enabled'
+  const column = kind === 'reminders' ? 'reminders_enabled' : 'shifts_enabled'
 
   const enabledUsers = new Set()
   for (const userId of uniqueIds) {

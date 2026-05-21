@@ -4,7 +4,6 @@ export const getNotificationSettingsStatement = db.prepare(`
   SELECT
     user_id,
     push_enabled,
-    messages_enabled,
     shifts_enabled,
     reminders_enabled,
     updated_at
@@ -16,16 +15,14 @@ export const upsertNotificationSettingsStatement = db.prepare(`
   INSERT INTO notification_settings(
     user_id,
     push_enabled,
-    messages_enabled,
     shifts_enabled,
     reminders_enabled,
     updated_at
   )
-  VALUES (?, ?, ?, ?, ?, datetime('now'))
+  VALUES (?, ?, ?, ?, datetime('now'))
   ON CONFLICT(user_id)
   DO UPDATE SET
     push_enabled = excluded.push_enabled,
-    messages_enabled = excluded.messages_enabled,
     shifts_enabled = excluded.shifts_enabled,
     reminders_enabled = excluded.reminders_enabled,
     updated_at = datetime('now')
