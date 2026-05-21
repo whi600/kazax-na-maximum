@@ -5,6 +5,8 @@ import {
 
 const editableResources = new Set(['schedule', 'assortment'])
 
+export const isEditableResource = (resource) => editableResources.has(resource)
+
 const toAuditPayload = (value) => {
   if (value === undefined || value === null) return null
   try {
@@ -49,6 +51,6 @@ export const logAudit = async ({
 }
 
 export const touchResource = async (resource, actorUser) => {
-  if (!editableResources.has(resource)) return
+  if (!isEditableResource(resource)) return
   await upsertResourceStateStatement.run(resource, actorUser?.name || actorUser?.email || 'system')
 }

@@ -19,14 +19,16 @@ import {
   verifyPassword,
 } from './auth.js'
 import { db, dbPath } from './db.js'
-import { logAudit, parseAuditJson, touchResource } from './audit.js'
+import { isEditableResource, logAudit, parseAuditJson, touchResource } from './audit.js'
 import {
   badRequest,
   forbidden,
   json,
   noContent,
   notFound,
+  parseCookies,
   readJsonBody,
+  unauthorized,
   withErrorHandling,
 } from './http.js'
 import { createStaticFileServer } from './static.js'
