@@ -36,6 +36,7 @@ const openPicker = (inputRef) => {
   if (typeof input.focus === 'function') input.focus()
   if (typeof input.click === 'function') input.click()
 }
+
 </script>
 
 <template>
@@ -64,14 +65,16 @@ const openPicker = (inputRef) => {
               </p>
 
               <div class="space-y-4">
-                <button
-                  type="button"
-                  class="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 text-left transition-colors active:bg-slate-100"
-                  @click="emit('open-date-picker')"
-                >
+                <div class="relative overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 transition-colors active:bg-slate-100">
                   <span class="mb-2 block text-[10px] font-black uppercase text-slate-400">Выберите дату</span>
                   <span class="block text-base font-bold text-slate-900">{{ formattedDate }}</span>
-                </button>
+                  <input
+                    type="date"
+                    :value="date"
+                    class="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0"
+                    @change="emit('update:date', $event.target.value)"
+                  />
+                </div>
 
                 <div class="grid grid-cols-2 gap-4">
                   <div
