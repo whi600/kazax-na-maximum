@@ -40,6 +40,7 @@ ensure_env_file() {
   ensure_env_value "APP_PORT" "127.0.0.1:8787"
   ensure_env_value "DATA_DIR" "$APP_ROOT/data"
   ensure_env_value "POSTGRES_DATA_DIR" "$APP_ROOT/postgres"
+  ensure_env_value "APP_TIMEZONE" "Asia/Yekaterinburg"
 }
 
 ensure_repo() {
@@ -47,6 +48,12 @@ ensure_repo() {
     git -C "$APP_DIR" fetch origin "$BRANCH"
     git -C "$APP_DIR" reset --hard "origin/$BRANCH"
     git -C "$APP_DIR" clean -fd
+    return
+  fi
+
+  if [ -f "$APP_DIR/docker-compose.yml" ]; then
+    echo "Using existing non-git app directory: $APP_DIR"
+    echo "To update source files on this server, sync a fresh archive before running this script."
     return
   fi
 
