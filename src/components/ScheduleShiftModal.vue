@@ -21,12 +21,29 @@ const emit = defineEmits([
   'update:endTime',
 ])
 
+const dateInput = ref(null)
 const startTimeInput = ref(null)
 const endTimeInput = ref(null)
 
 const openPicker = (inputRef) => {
   const input = inputRef?.value
   if (!input) return
+
+  if (typeof input.showPicker === 'function') {
+    input.showPicker()
+    return
+  }
+
+  if (typeof input.focus === 'function') input.focus()
+  if (typeof input.click === 'function') input.click()
+}
+
+const openDatePicker = () => {
+  const input = dateInput.value
+  if (!input) {
+    emit('open-date-picker')
+    return
+  }
 
   if (typeof input.showPicker === 'function') {
     input.showPicker()
@@ -65,16 +82,21 @@ const openPicker = (inputRef) => {
               </p>
 
               <div class="space-y-4">
-                <div class="relative overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 transition-colors active:bg-slate-100">
+                <button
+                  type="button"
+                  class="relative w-full overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 text-left transition-colors active:bg-slate-100"
+                  @click="openDatePicker"
+                >
                   <span class="mb-2 block text-[10px] font-black uppercase text-slate-400">Выберите дату</span>
                   <span class="block text-base font-bold text-slate-900">{{ formattedDate }}</span>
                   <input
+                    ref="dateInput"
                     type="date"
                     :value="date"
-                    class="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0"
+                    class="pointer-events-none absolute inset-0 z-10 h-full w-full appearance-none opacity-0"
                     @change="emit('update:date', $event.target.value)"
                   />
-                </div>
+                </button>
 
                 <div class="grid grid-cols-2 gap-4">
                   <div
