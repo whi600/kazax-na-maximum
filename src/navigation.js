@@ -22,11 +22,12 @@ export const getTabFromLocation = () => {
   return getTabFromPath(window.location.pathname)
 }
 
-export const buildNavItems = (canAccessArchive) => {
-  const items = [
-    { tab: 'main', label: 'Отчет', icon: 'report' },
-    { tab: 'schedule', label: 'График', icon: 'schedule' },
-  ]
+export const buildNavItems = ({ canAccessSchedule = true, canAccessArchive = false } = {}) => {
+  const items = [{ tab: 'main', label: 'Отчет', icon: 'report' }]
+
+  if (canAccessSchedule) {
+    items.push({ tab: 'schedule', label: 'График', icon: 'schedule' })
+  }
 
   if (canAccessArchive) {
     items.push({ tab: 'archive', label: 'Архив', icon: 'archive' })

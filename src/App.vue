@@ -80,9 +80,8 @@ const canManageProducts = computed(() => Boolean(userPermissions.value.productsM
 const canManageSchedule = computed(() => Boolean(userPermissions.value.scheduleManage))
 const canViewAudit = computed(() => Boolean(userPermissions.value.auditView))
 const canManageRoles = computed(() => Boolean(userPermissions.value.rolesManage))
-const canAccessArchive = computed(
-  () => canViewAudit.value || userRole.value === 'chef',
-)
+const canAccessSchedule = computed(() => userRole.value !== 'chef')
+const canAccessArchive = computed(() => canViewAudit.value && userRole.value !== 'chef')
 
 const pageTitle = computed(() => {
   if (activeTab.value === 'schedule') return 'График'
@@ -100,7 +99,12 @@ const pageTitle = computed(() => {
   return 'Отчет'
 })
 
-const navItems = computed(() => buildNavItems(canAccessArchive.value))
+const navItems = computed(() =>
+  buildNavItems({
+    canAccessSchedule: canAccessSchedule.value,
+    canAccessArchive: canAccessArchive.value,
+  }),
+)
 
 const updateRoute = (tab, replace = false) => {
   if (typeof window === 'undefined') return
@@ -113,7 +117,11 @@ const updateRoute = (tab, replace = false) => {
 }
 
 const navigateTo = (tab, replace = false) => {
-  const nextTab = tab === 'archive' && !canAccessArchive.value ? 'main' : tab
+  const nextTab =
+    (tab === 'archive' && !canAccessArchive.value) ||
+    (tab === 'schedule' && !canAccessSchedule.value)
+      ? 'main'
+      : tab
   activeTab.value = nextTab
   if (nextTab !== 'profile') profileView.value = 'main'
   updateRoute(nextTab, replace)
@@ -651,8 +659,11 @@ const closeKeyboard = (event) => {
   document.activeElement?.blur()
 }
 
-watch(canAccessArchive, (allowed) => {
-  if (activeTab.value === 'archive' && !allowed) {
+watch([canAccessArchive, canAccessSchedule], ([archiveAllowed, scheduleAllowed]) => {
+  if (
+    (activeTab.value === 'archive' && !archiveAllowed) ||
+    (activeTab.value === 'schedule' && !scheduleAllowed)
+  ) {
     navigateTo('main', true)
   }
 })
@@ -798,7 +809,7 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div v-else-if="activeTab === 'schedule'" class="page-fade">
+        <div v-else-if="activeTab === 'schedule' && canAccessSchedule" class="page-fade">
           <ScheduleView
             ref="scheduleViewRef"
             :userRole="userRole"
@@ -812,8 +823,8 @@ onBeforeUnmount(() => {
         <div v-else>
           <div v-if="activeTab === 'archive' && canAccessArchive" class="page-fade">
             <AdminArchive
-              :lockedMode="!canViewAudit && userRole === 'chef' ? 'records' : ''"
-              :hideToggle="!canViewAudit && userRole === 'chef'"
+              lockedMode=""
+              :hideToggle="false"
               :canViewAudit="canViewAudit"
             />
           </div>
