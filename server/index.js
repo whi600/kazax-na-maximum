@@ -27,7 +27,7 @@ import {
   json,
   noContent,
   notFound,
-  readJsonBody as readJsonRequestBody,
+  readJsonBody,
   withErrorHandling,
 } from './http.js'
 import {
