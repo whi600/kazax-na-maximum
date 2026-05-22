@@ -13,6 +13,7 @@ import {
   formatShiftDay,
   formatShiftWeekday,
   getRecordDateKey,
+  parseDate,
   parseShiftHours,
   toDateKey,
 } from '../archiveUtils'

@@ -7,6 +7,7 @@ import {
   formatDateHeader,
   formatDateInput,
   formatWeekDay,
+  formatWeekRange,
   getCurrentWeekStart,
   getNextWeekStart,
   getWeekDates,
