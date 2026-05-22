@@ -41,8 +41,8 @@ let recordsLoadObserver = null
 const safeAlert = (message) => alert(message)
 
 const recordCategorySections = [
-  { key: 'bakery', label: 'Выпечка' },
   { key: 'pastry', label: 'Кондитерка' },
+  { key: 'bakery', label: 'Выпечка' },
   { key: 'other', label: 'Другое' },
 ]
 
@@ -290,18 +290,24 @@ const recordsDaySections = computed(() =>
   Object.entries(recordsHistory.value)
     .sort(([a], [b]) => (a < b ? 1 : -1))
     .map(([dateKey, rows]) => {
-      const sections = recordCategorySections
-        .map((category) => ({
-          ...category,
-          rows: rows.filter((record) => (record.products?.category || 'other') === category.key),
-        }))
-        .filter((section) => section.rows.length > 0)
+      const groupedRows = recordCategorySections.flatMap((category) =>
+        rows
+          .filter((record) => (record.products?.category || 'other') === category.key)
+          .map((record, index) => ({
+            ...record,
+            categoryKey: category.key,
+            startsCategory: index === 0,
+          })),
+      )
 
       return {
         key: dateKey,
         dateLabel: formatDateLabel(dateKey),
         weekDayLabel: formatRecordWeekday(dateKey),
-        sections,
+        rows: groupedRows.map((record, index) => ({
+          ...record,
+          hasCategoryDivider: record.startsCategory && index > 0,
+        })),
       }
     }),
 )
@@ -533,38 +539,32 @@ onBeforeUnmount(() => {
             {{ section.dateLabel }} • {{ section.weekDayLabel }}
           </span>
         </div>
-        <div class="space-y-4 p-3">
-          <div
-            v-for="category in section.sections"
-            :key="category.key"
-            class="overflow-hidden rounded-xl border border-slate-100"
-          >
-            <div class="bg-slate-50 px-3 py-2 text-xs font-black uppercase text-slate-500">
-              {{ category.label }}
-            </div>
-            <table class="w-full table-fixed text-sm">
-              <thead>
-                <tr class="text-slate-500 uppercase text-[11px] font-black">
-                  <th class="text-left px-2.5 py-2.5 w-[43%] border-b border-r border-slate-100">Продукт</th>
-                  <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-r border-slate-100">Приход</th>
-                  <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-r border-slate-100">Остаток</th>
-                  <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-slate-100">Списание</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="record in category.rows"
-                  :key="record.id"
-                  class="border-t border-slate-100 font-bold"
-                >
-                  <td class="px-2.5 py-3 leading-tight text-slate-900 border-r border-slate-100">{{ record.products?.name || 'Удален' }}</td>
-                  <td class="px-1.5 py-3 text-right text-blue-600 border-r border-slate-100">{{ record.arrival }}</td>
-                  <td class="px-1.5 py-3 text-right text-slate-800 border-r border-slate-100">{{ record.remainder }}</td>
-                  <td class="px-1.5 py-3 text-right text-red-500">{{ record.write_off }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <div class="p-3">
+          <table class="w-full table-fixed text-sm">
+            <thead>
+              <tr class="text-slate-500 uppercase text-[11px] font-black">
+                <th class="text-left px-2.5 py-2.5 w-[43%] border-b border-r border-slate-100">Продукт</th>
+                <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-r border-slate-100">Приход</th>
+                <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-r border-slate-100">Остаток</th>
+                <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-slate-100">Списание</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="record in section.rows"
+                :key="record.id"
+                :class="[
+                  'font-bold',
+                  record.hasCategoryDivider ? 'border-t-2 border-slate-300' : 'border-t border-slate-100',
+                ]"
+              >
+                <td class="px-2.5 py-3 leading-tight text-slate-900 border-r border-slate-100">{{ record.products?.name || 'Удален' }}</td>
+                <td class="px-1.5 py-3 text-right text-blue-600 border-r border-slate-100">{{ record.arrival }}</td>
+                <td class="px-1.5 py-3 text-right text-slate-800 border-r border-slate-100">{{ record.remainder }}</td>
+                <td class="px-1.5 py-3 text-right text-red-500">{{ record.write_off }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
