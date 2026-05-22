@@ -30,6 +30,13 @@ export const listUsersWithScheduleManageStatement = db.prepare(`
   ORDER BY u.created_at DESC, u.id DESC
 `)
 
+export const listEmployeeUsersStatement = db.prepare(`
+  SELECT id, email, name, role, created_at
+  FROM users
+  WHERE role = 'employee'
+  ORDER BY created_at DESC, id DESC
+`)
+
 export const updateUserRoleStatement = db.prepare(
   "UPDATE users SET role = ? WHERE id = ?",
 )

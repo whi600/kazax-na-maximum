@@ -46,6 +46,7 @@ import {
   getUsersCountStatement,
   getUserByEmailStatement,
   getUserByIdStatement,
+  listEmployeeUsersStatement,
   listUsersForRoleManageStatement,
   listUsersWithScheduleManageStatement,
   updateUserRoleStatement,
@@ -143,6 +144,45 @@ const parseInteger = (value, fallback) => {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return fallback
   return parsed
+}
+
+const formatShiftLabel = (shift) =>
+  `${shift.date} ${shift.start_time}-${shift.end_time}`
+
+const getScheduleManagerIds = async (excludeUserId = null) =>
+  (await listUsersWithScheduleManageStatement.all())
+    .map((row) => Number(row.id))
+    .filter((id) => Number.isFinite(id) && id !== Number(excludeUserId))
+
+const getEmployeeUserIds = async (excludeUserId = null) =>
+  (await listEmployeeUsersStatement.all())
+    .map((row) => Number(row.id))
+    .filter((id) => Number.isFinite(id) && id !== Number(excludeUserId))
+
+const notifyNewFreeShifts = async (shifts, actorUser) => {
+  if (!shifts.length) return
+
+  const recipients = await getEmployeeUserIds(actorUser?.id)
+  if (recipients.length === 0) return
+
+  const firstShift = shifts[0]
+  await notifyUsers(
+    recipients,
+    'shifts',
+    buildPushPayload({
+      title: shifts.length === 1 ? 'Новая свободная смена' : 'Новые свободные смены',
+      body:
+        shifts.length === 1
+          ? formatShiftLabel(firstShift)
+          : `Добавлено смен: ${shifts.length}. Ближайшая: ${formatShiftLabel(firstShift)}`,
+      url: '/schedule',
+      tag:
+        shifts.length === 1
+          ? `shift-created-${firstShift.id}`
+          : `shifts-created-${firstShift.date}-${shifts.length}`,
+      urgency: 'high',
+    }),
+  )
 }
 
 const normalizeProductCategory = (value) => {
@@ -668,6 +708,17 @@ const appServer = http.createServer((req, res) => {
           status: 'approved',
         },
       })
+      await notifyNewFreeShifts(
+        [
+          {
+            id: Number(result.lastInsertRowid),
+            date,
+            start_time: startTime,
+            end_time: endTime,
+          },
+        ],
+        user,
+      )
 
       json(res, 201, { id: Number(result.lastInsertRowid) })
       return
@@ -682,7 +733,7 @@ const appServer = http.createServer((req, res) => {
       const deletedIds = Array.isArray(body.deletedIds) ? body.deletedIds : []
       const newShifts = Array.isArray(body.newShifts) ? body.newShifts : []
 
-      const { deletedSnapshot, createdIds } = await db.transaction(async (client) => {
+      const { deletedSnapshot, createdIds, createdShifts } = await db.transaction(async (client) => {
         const deletedSnapshot = []
         for (const id of deletedIds) {
           const shiftId = Number(id)
@@ -693,6 +744,7 @@ const appServer = http.createServer((req, res) => {
         }
 
         const createdIds = []
+        const createdShifts = []
         for (const shift of newShifts) {
           const date = String(shift.date || '')
           const startTime = String(shift.start_time || '')
@@ -709,10 +761,17 @@ const appServer = http.createServer((req, res) => {
             'approved',
             user.id,
           )
-          createdIds.push(Number(result.lastInsertRowid))
+          const id = Number(result.lastInsertRowid)
+          createdIds.push(id)
+          createdShifts.push({
+            id,
+            date,
+            start_time: startTime,
+            end_time: endTime,
+          })
         }
 
-        return { deletedSnapshot, createdIds }
+        return { deletedSnapshot, createdIds, createdShifts }
       })
 
       await touchResource('schedule', user)
@@ -729,6 +788,28 @@ const appServer = http.createServer((req, res) => {
           },
         })
       }
+      await notifyNewFreeShifts(createdShifts, user)
+      await Promise.all(
+        deletedSnapshot
+          .filter(
+            (shift) =>
+              shift.employee_name &&
+              normalizePersonName(shift.employee_name) !== normalizePersonName(user.name),
+          )
+          .map((shift) =>
+            notifyUserByName(
+              shift.employee_name,
+              'shifts',
+              buildPushPayload({
+                title: 'Смена удалена',
+                body: formatShiftLabel(shift),
+                url: '/schedule',
+                tag: `shift-deleted-${shift.id}`,
+                urgency: 'high',
+              }),
+            ),
+          ),
+      )
 
       json(res, 200, { ok: true, createdIds })
       return
@@ -761,6 +842,17 @@ const appServer = http.createServer((req, res) => {
           before: shift,
           after: { ...shift, employee_name: authUser.name },
         })
+        const scheduleManagers = await getScheduleManagerIds(authUser.id)
+        await notifyUsers(
+          scheduleManagers,
+          'shifts',
+          buildPushPayload({
+            title: 'Смена занята',
+            body: `${authUser.name}: ${formatShiftLabel(shift)}`,
+            url: '/schedule',
+            tag: `shift-booked-${shiftAction.id}`,
+          }),
+        )
         json(res, 200, { ok: true })
         return
       }
@@ -837,6 +929,23 @@ const appServer = http.createServer((req, res) => {
           before: shift,
           after: { ...shift, employee_name: null },
         })
+        if (
+          authPermissions.scheduleManage &&
+          shift.employee_name &&
+          normalizePersonName(shift.employee_name) !== normalizePersonName(authUser.name)
+        ) {
+          await notifyUserByName(
+            shift.employee_name,
+            'shifts',
+            buildPushPayload({
+              title: 'С вас сняли смену',
+              body: formatShiftLabel(shift),
+              url: '/schedule',
+              tag: `shift-unbooked-${shiftAction.id}`,
+              urgency: 'high',
+            }),
+          )
+        }
         json(res, 200, { ok: true })
         return
       }
@@ -900,6 +1009,21 @@ const appServer = http.createServer((req, res) => {
               body: `${shift.date} ${shift.start_time}-${shift.end_time}`,
               url: '/schedule',
               tag: `shift-rejected-${shiftAction.id}`,
+              urgency: 'high',
+            }),
+          )
+        } else if (
+          shift.employee_name &&
+          normalizePersonName(shift.employee_name) !== normalizePersonName(authUser.name)
+        ) {
+          await notifyUserByName(
+            shift.employee_name,
+            'shifts',
+            buildPushPayload({
+              title: 'Смена удалена',
+              body: formatShiftLabel(shift),
+              url: '/schedule',
+              tag: `shift-deleted-${shiftAction.id}`,
               urgency: 'high',
             }),
           )
