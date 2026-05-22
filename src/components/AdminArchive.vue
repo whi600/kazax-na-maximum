@@ -512,20 +512,20 @@ onBeforeUnmount(() => {
         :key="section.key"
         class="bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm"
       >
-        <div class="bg-slate-50 px-3 py-1.5 border-b border-slate-100 flex items-center gap-2">
-          <Calendar class="w-3.5 h-3.5 text-blue-600" />
-          <span class="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+        <div class="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2.5">
+          <Calendar class="w-5 h-5 text-blue-600" />
+          <span class="text-xs font-black text-slate-500 uppercase tracking-normal">
             {{ section.dateLabel }} • {{ section.weekDayLabel }}
           </span>
         </div>
-        <div class="p-2">
-          <table class="w-full table-fixed text-[10px]">
+        <div class="p-3">
+          <table class="w-full table-fixed text-sm">
             <thead>
-              <tr class="text-slate-400 uppercase text-[9px] font-black">
-                <th class="text-left px-2 py-1.5 w-[40%] border-b border-r border-slate-100">Продукт</th>
-                <th class="text-right px-2 py-1.5 w-[20%] border-b border-r border-slate-100">Поступило</th>
-                <th class="text-right px-2 py-1.5 w-[20%] border-b border-r border-slate-100">Осталось</th>
-                <th class="text-right px-2 py-1.5 w-[20%] border-b border-slate-100">Списалось</th>
+              <tr class="text-slate-500 uppercase text-[11px] font-black">
+                <th class="text-left px-2.5 py-2.5 w-[43%] border-b border-r border-slate-100">Продукт</th>
+                <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-r border-slate-100">Приход</th>
+                <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-r border-slate-100">Остаток</th>
+                <th class="text-right px-1.5 py-2.5 w-[19%] border-b border-slate-100">Списание</th>
               </tr>
             </thead>
             <tbody>
@@ -534,10 +534,10 @@ onBeforeUnmount(() => {
                 :key="record.id"
                 class="border-t border-slate-100 font-bold"
               >
-                <td class="px-2 py-2 text-slate-800 truncate border-r border-slate-100">{{ record.products?.name || 'Удален' }}</td>
-                <td class="px-2 py-2 text-right text-blue-600 border-r border-slate-100">{{ record.arrival }}</td>
-                <td class="px-2 py-2 text-right text-slate-700 border-r border-slate-100">{{ record.remainder }}</td>
-                <td class="px-2 py-2 text-right text-red-500">{{ record.write_off }}</td>
+                <td class="px-2.5 py-3 leading-tight text-slate-900 border-r border-slate-100">{{ record.products?.name || 'Удален' }}</td>
+                <td class="px-1.5 py-3 text-right text-blue-600 border-r border-slate-100">{{ record.arrival }}</td>
+                <td class="px-1.5 py-3 text-right text-slate-800 border-r border-slate-100">{{ record.remainder }}</td>
+                <td class="px-1.5 py-3 text-right text-red-500">{{ record.write_off }}</td>
               </tr>
             </tbody>
           </table>
