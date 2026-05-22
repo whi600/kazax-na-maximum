@@ -3,6 +3,19 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { recordsApi, shiftsApi } from '../api'
 import { Calendar, Clock, User } from 'lucide-vue-next'
 import DatePickerSheet from './DatePickerSheet.vue'
+import {
+  buildRecordsDaySections,
+  formatAuditAction,
+  formatAuditEntity,
+  formatAuditSummary,
+  formatDateLabel,
+  formatHours,
+  formatShiftDay,
+  formatShiftWeekday,
+  getRecordDateKey,
+  parseShiftHours,
+  toDateKey,
+} from '../archiveUtils'
 
 const props = defineProps({
   lockedMode: { type: String, default: '' },
@@ -40,76 +53,10 @@ let recordsLoadObserver = null
 
 const safeAlert = (message) => alert(message)
 
-const recordCategorySections = [
-  { key: 'pastry', label: 'Кондитерка' },
-  { key: 'bakery', label: 'Выпечка' },
-  { key: 'other', label: 'Другое' },
-]
-
-const parseDate = (dateStr) => {
-  const [year, month, day] = String(dateStr || '').split('-').map(Number)
-  if (!year || !month || !day) return new Date()
-  return new Date(year, month - 1, day)
-}
-
-const formatDateLabel = (dateStr) => {
-  if (!dateStr) return ''
-  return parseDate(dateStr).toLocaleDateString('ru-RU', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-const formatShiftDay = (dateStr) =>
-  parseDate(dateStr).toLocaleDateString('ru-RU', {
-    day: 'numeric',
-    month: 'long',
-  })
-
-const formatShiftWeekday = (dateStr) =>
-  parseDate(dateStr).toLocaleDateString('ru-RU', { weekday: 'long' })
-
-const toDateKey = (date) => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const getRecordDateKey = (dateValue) => {
-  if (!dateValue) return ''
-  const date = new Date(dateValue)
-  if (Number.isNaN(date.getTime())) return ''
-  return toDateKey(date)
-}
-
-const formatRecordWeekday = (dateKey) =>
-  parseDate(dateKey).toLocaleDateString('ru-RU', { weekday: 'long' }).toUpperCase()
-
 const setDefaultPeriod = () => {
   const now = new Date()
   periodStart.value = toDateKey(new Date(now.getFullYear(), now.getMonth(), 1))
   periodEnd.value = toDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0))
-}
-
-const parseShiftHours = (shift) => {
-  if (!shift?.date || !shift?.start_time || !shift?.end_time) return 0
-
-  const start = new Date(`${shift.date}T${shift.start_time}`)
-  const end = new Date(`${shift.date}T${shift.end_time}`)
-
-  if (end <= start) {
-    end.setDate(end.getDate() + 1)
-  }
-
-  const diff = (end - start) / 3600000
-  return diff > 0 ? diff : 0
-}
-
-const formatHours = (hours) => {
-  const rounded = Math.round(hours * 10) / 10
-  return String(rounded).replace('.', ',')
 }
 
 const baseShifts = computed(() =>
@@ -247,70 +194,7 @@ const formatDateTimeLabel = (value) => {
   })
 }
 
-const auditActionLabels = {
-  'product.create': 'Товар добавлен',
-  'product.update': 'Товар изменен',
-  'product.delete': 'Товар удален',
-  'shift.help_request': 'Заявка на помощь',
-  'shift.admin_create': 'Смена создана',
-  'shift.bulk_save': 'Изменения расписания',
-  'shift.book': 'Сотрудник записан',
-  'shift.unbook': 'Запись снята',
-  'shift.approve': 'Заявка подтверждена',
-  'shift.delete': 'Смена удалена',
-  'user.role_update': 'Роль пользователя изменена',
-}
-
-const auditEntityLabels = {
-  product: 'Ассортимент',
-  shift: 'График',
-  user: 'Пользователи',
-}
-
-const formatAuditAction = (action) => auditActionLabels[action] || action
-const formatAuditEntity = (entityType) => auditEntityLabels[entityType] || entityType
-
-const formatAuditSummary = (log) => {
-  if (log.action === 'shift.bulk_save') {
-    const deleted = Number(log.context?.deletedCount || 0)
-    const created = Number(log.context?.createdCount || 0)
-    return `Добавлено: ${created}, удалено: ${deleted}`
-  }
-
-  const source = log.after || log.before
-  if (source?.name) return source.name
-  if (source?.date && source?.start_time && source?.end_time) {
-    return `${source.date} • ${source.start_time}-${source.end_time}`
-  }
-
-  return ''
-}
-
-const recordsDaySections = computed(() =>
-  Object.entries(recordsHistory.value)
-    .sort(([a], [b]) => (a < b ? 1 : -1))
-    .map(([dateKey, rows]) => {
-      const groupedRows = recordCategorySections.flatMap((category) =>
-        rows
-          .filter((record) => (record.products?.category || 'other') === category.key)
-          .map((record, index) => ({
-            ...record,
-            categoryKey: category.key,
-            startsCategory: index === 0,
-          })),
-      )
-
-      return {
-        key: dateKey,
-        dateLabel: formatDateLabel(dateKey),
-        weekDayLabel: formatRecordWeekday(dateKey),
-        rows: groupedRows.map((record, index) => ({
-          ...record,
-          hasCategoryDivider: record.startsCategory && index > 0,
-        })),
-      }
-    }),
-)
+const recordsDaySections = computed(() => buildRecordsDaySections(recordsHistory.value))
 
 const visibleRecordsDaySections = computed(() =>
   recordsDaySections.value.slice(0, visibleRecordDays.value),

@@ -7,7 +7,6 @@ import {
   formatDateHeader,
   formatDateInput,
   formatWeekDay,
-  formatWeekRange,
   getCurrentWeekStart,
   getNextWeekStart,
   getWeekDates,
@@ -20,14 +19,12 @@ import {
 import DatePickerSheet from './DatePickerSheet.vue'
 import {
   Calendar,
-  Trash2,
   Bell,
-  Plus,
-  Pencil,
-  X,
 } from 'lucide-vue-next'
 import SchedulePendingRequestsSheet from './SchedulePendingRequestsSheet.vue'
+import ScheduleShiftCard from './ScheduleShiftCard.vue'
 import ScheduleShiftModal from './ScheduleShiftModal.vue'
+import ScheduleWeekControls from './ScheduleWeekControls.vue'
 
 const props = defineProps({
   userRole: { type: String, default: '' },
@@ -841,54 +838,16 @@ onBeforeUnmount(() => {
           {{ scheduleEditorsLabel }}
         </div>
 
-        <div class="mb-4 schedule-fade">
-          <div class="flex gap-2 overflow-x-auto pb-1 mb-3">
-            <button
-              v-for="weekStart in weekStarts"
-              :key="weekStart"
-              @click="onWeekTabClick(weekStart)"
-              @pointerdown="startWeekHold(weekStart)"
-              @pointerup="cancelWeekHold"
-              @pointerleave="cancelWeekHold"
-              @pointercancel="cancelWeekHold"
-              @contextmenu.prevent
-              class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all"
-              :class="
-                weekStart === selectedWeekStart
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-white text-slate-400 border-slate-100'
-              "
-              type="button"
-            >
-              <span class="block text-[10px] font-black uppercase">Неделя</span>
-              <span class="block text-xs font-black">{{ formatWeekRange(weekStart) }}</span>
-            </button>
-            <button
-              v-if="canManageSchedule"
-              @click="addNextWeekTemplate"
-              class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all bg-white text-slate-400 border-slate-100 flex items-center justify-center min-w-[108px]"
-              type="button"
-              aria-label="Добавить неделю"
-            >
-              <Plus class="w-5 h-5" />
-            </button>
-          </div>
-
-          <div class="grid grid-cols-3 gap-2 mb-5">
-            <div class="schedule-stat bg-white rounded-lg border border-slate-100 p-3">
-              <p class="text-[9px] font-black text-slate-400 uppercase">Всего</p>
-              <p class="text-xl font-black text-slate-800">{{ selectedWeekStats.shiftsCount }}</p>
-            </div>
-            <div class="schedule-stat bg-white rounded-lg border border-slate-100 p-3">
-              <p class="text-[9px] font-black text-slate-400 uppercase">Свободно</p>
-              <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.openCount }}</p>
-            </div>
-            <div class="schedule-stat bg-white rounded-lg border border-slate-100 p-3">
-              <p class="text-[9px] font-black text-slate-400 uppercase">Мои</p>
-              <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.myCount }}</p>
-            </div>
-          </div>
-        </div>
+        <ScheduleWeekControls
+          :week-starts="weekStarts"
+          :selected-week-start="selectedWeekStart"
+          :selected-week-stats="selectedWeekStats"
+          :can-manage-schedule="canManageSchedule"
+          @select-week="onWeekTabClick"
+          @hold-week="startWeekHold"
+          @cancel-hold="cancelWeekHold"
+          @add-week="addNextWeekTemplate"
+        />
 
         <TransitionGroup name="day-card" appear tag="div" class="space-y-8">
           <div v-for="(day, dayIndex) in selectedWeekDays" :key="day.date" class="day-card">
@@ -917,89 +876,21 @@ onBeforeUnmount(() => {
             </div>
 
             <TransitionGroup name="shift-card" appear tag="div" class="space-y-2">
-              <div
+              <ScheduleShiftCard
                 v-for="(shift, shiftIndex) in day.shifts"
                 :key="shift.id"
-                class="p-3.5 rounded-lg border shadow-sm flex items-center justify-between transition-all"
-                :class="
-                  day.isPast
-                    ? 'bg-slate-100 border-slate-200 opacity-70'
-                    : 'bg-white border-slate-100'
-                "
-                :style="{
-                  '--day-delay': `${dayIndex * 80}ms`,
-                  '--shift-delay': `${shiftIndex * 70}ms`,
-                }"
-              >
-                <div class="flex items-center gap-2">
-                  <span
-                    class="text-[12px] font-black px-2 py-1.5 rounded-lg border"
-                    :class="
-                      day.isPast
-                        ? 'bg-slate-200/80 border-slate-200 text-slate-500'
-                        : 'bg-slate-50 border-slate-100 text-slate-800'
-                    "
-                  >
-                    {{ shift.start_time }}–{{ shift.end_time }}
-                  </span>
-                  <span v-if="isNewShift(shift)" class="text-[8px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase">
-                    New
-                  </span>
-                </div>
-
-                <div class="flex items-center gap-3">
-                  <div
-                    v-if="shift.employee_name"
-                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg border"
-                    :class="
-                      day.isPast
-                        ? 'bg-slate-200/60 border-slate-200 text-slate-500'
-                        : 'bg-blue-50/50 border-blue-100/50'
-                    "
-                  >
-                    <span
-                      class="text-[11px] font-black"
-                      :class="day.isPast ? 'text-slate-500' : 'text-blue-600'"
-                    >
-                      {{ shift.employee_name }}
-                    </span>
-                    <button
-                      v-if="!day.isPast && (canManageSchedule || canSelfCancelBooking(shift))"
-                      @click="cancelBooking(shift)"
-                      class="p-0.5 text-red-500 transition-colors hover:bg-white rounded-md"
-                      aria-label="Снять сотрудника со смены"
-                    >
-                      <X class="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
-                  <button
-                    v-else-if="!day.isPast"
-                    @click="bookShift(shift)"
-                    class="bg-slate-800 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md active:scale-95 transition-all"
-                  >
-                    Запись
-                  </button>
-
-                  <button
-                    v-if="canManageSchedule && !day.isPast"
-                    @click="openEditModal(shift)"
-                    class="text-slate-300 hover:text-blue-600 transition-colors"
-                    aria-label="Редактировать смену"
-                  >
-                    <Pencil class="w-4 h-4" />
-                  </button>
-
-                  <button
-                    v-if="canManageSchedule && !day.isPast"
-                    @click="markForDeletion(shift)"
-                    class="text-slate-200 transition-colors hover:text-red-500"
-                    aria-label="Удалить смену"
-                  >
-                    <Trash2 class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+                :shift="shift"
+                :is-past="day.isPast"
+                :is-new="isNewShift(shift)"
+                :can-manage-schedule="canManageSchedule"
+                :can-self-cancel="canSelfCancelBooking(shift)"
+                :day-delay="`${dayIndex * 80}ms`"
+                :shift-delay="`${shiftIndex * 70}ms`"
+                @book="bookShift(shift)"
+                @cancel="cancelBooking(shift)"
+                @edit="openEditModal(shift)"
+                @delete="markForDeletion(shift)"
+              />
             </TransitionGroup>
           </div>
         </TransitionGroup>
@@ -1059,127 +950,3 @@ onBeforeUnmount(() => {
     />
   </div>
 </template>
-
-<style scoped>
-@keyframes swing {
-  0%,
-  100% {
-    transform: rotate(0);
-  }
-  20% {
-    transform: rotate(10deg);
-  }
-  40% {
-    transform: rotate(-10deg);
-  }
-  60% {
-    transform: rotate(5deg);
-  }
-  80% {
-    transform: rotate(-5deg);
-  }
-}
-
-.animate-swing {
-  animation: swing 2s infinite;
-}
-
-.modal-sheet-max {
-  max-height: calc(
-    100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)
-  );
-}
-
-.schedule-shell-enter-active,
-.schedule-shell-leave-active {
-  transition:
-    opacity 220ms ease,
-    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.schedule-shell-enter-from,
-.schedule-shell-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
-.schedule-shell-enter-to,
-.schedule-shell-leave-from {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.schedule-fade {
-  animation: schedule-fade-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.schedule-stat {
-  animation: schedule-stat-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.day-card-enter-active,
-.day-card-leave-active,
-.shift-card-enter-active,
-.shift-card-leave-active {
-  transition:
-    opacity 220ms ease,
-    transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.day-card-enter-from,
-.day-card-leave-to {
-  opacity: 0;
-  transform: translateY(12px);
-}
-
-.day-card-enter-to,
-.day-card-leave-from {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.shift-card-enter-from,
-.shift-card-leave-to {
-  opacity: 0;
-  transform: translateY(10px) scale(0.985);
-}
-
-.shift-card-enter-to,
-.shift-card-leave-from {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.day-card > .space-y-2 > *:nth-child(1),
-.day-card > .space-y-2 > *:nth-child(2),
-.day-card > .space-y-2 > *:nth-child(3),
-.day-card > .space-y-2 > *:nth-child(4) {
-  animation-delay: calc(var(--shift-delay, 0ms) + var(--day-delay, 0ms));
-}
-
-@keyframes schedule-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes schedule-stat-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-::-webkit-scrollbar {
-  display: none;
-}
-</style>

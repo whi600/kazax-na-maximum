@@ -13,10 +13,7 @@ import AuthView from './components/AuthView.vue'
 import AppHeader from './components/AppHeader.vue'
 import AppBottomNav from './components/AppBottomNav.vue'
 import ReportView from './components/ReportView.vue'
-import ProfileHomeView from './components/ProfileHomeView.vue'
-import AssortmentEditorView from './components/AssortmentEditorView.vue'
-import RoleSettingsView from './components/RoleSettingsView.vue'
-import NotificationSettingsView from './components/NotificationSettingsView.vue'
+import AppProfileSection from './components/AppProfileSection.vue'
 import {
   RotateCw,
 } from 'lucide-vue-next'
@@ -753,61 +750,46 @@ onBeforeUnmount(() => {
           <RotateCw class="w-6 h-6 animate-spin text-blue-600" />
         </div>
 
-        <div v-else-if="activeTab === 'profile'" class="p-2 page-fade page-stack">
-          <ProfileHomeView
-            v-if="profileView === 'main'"
-            :user-name="userName"
-            :email="currentUser?.email"
-            :role-label="roleLabels[userRole] || userRole"
-            :can-manage-products="canManageProducts"
-            :can-manage-roles="canManageRoles"
-            @open-assortment="profileView = 'assortment'"
-            @open-notifications="profileView = 'notifications'"
-            @open-roles="profileView = 'roles'"
-            @logout="logout"
-          />
-
-          <NotificationSettingsView
-            v-else-if="profileView === 'notifications'"
-            @back="profileView = 'main'"
-          />
-
-          <AssortmentEditorView
-            v-else-if="profileView === 'assortment'"
-            :products="products"
-            :form="productForm"
-            :editing-product-id="editingProductId"
-            :busy="productSaveBusy"
-            :editors-label="assortmentEditorsLabel"
-            :last-changed-label="assortmentLastChangedLabel"
-            @back="profileView = 'main'; resetProductForm()"
-            @update-field="updateProductFormField"
-            @save="saveProduct"
-            @reset="resetProductForm"
-            @edit-product="startEditProduct"
-            @remove-product="removeProduct"
-          />
-
-          <RoleSettingsView
-            v-else
-            :role-permissions="rolePermissions"
-            :permission-rows="permissionRows"
-            :role-users="roleUsers"
-            :role-labels="roleLabels"
-            :role-settings-busy="roleSettingsBusy"
-            :role-users-loading="roleUsersLoading"
-            :role-user-updating-id="roleUserUpdatingId"
-            :current-user-id="currentUser?.id"
-            :is-super-admin="isSuperAdmin"
-            :super-admin-email="SUPER_ADMIN_EMAIL"
-            @back="profileView = 'main'"
-            @toggle-permission="toggleRolePermission"
-            @save-permissions="saveRolePermissions"
-            @refresh-users="loadRoleUsers"
-            @update-user-role="updateRoleUserDraft"
-            @change-user-role="changeUserRole"
-          />
-        </div>
+        <AppProfileSection
+          v-else-if="activeTab === 'profile'"
+          :profile-view="profileView"
+          :user-name="userName"
+          :email="currentUser?.email"
+          :role-label="roleLabels[userRole] || userRole"
+          :can-manage-products="canManageProducts"
+          :can-manage-roles="canManageRoles"
+          :products="products"
+          :product-form="productForm"
+          :editing-product-id="editingProductId"
+          :product-save-busy="productSaveBusy"
+          :assortment-editors-label="assortmentEditorsLabel"
+          :assortment-last-changed-label="assortmentLastChangedLabel"
+          :role-permissions="rolePermissions"
+          :permission-rows="permissionRows"
+          :role-users="roleUsers"
+          :role-labels="roleLabels"
+          :role-settings-busy="roleSettingsBusy"
+          :role-users-loading="roleUsersLoading"
+          :role-user-updating-id="roleUserUpdatingId"
+          :current-user-id="currentUser?.id"
+          :is-super-admin="isSuperAdmin"
+          :super-admin-email="SUPER_ADMIN_EMAIL"
+          @open-assortment="profileView = 'assortment'"
+          @open-notifications="profileView = 'notifications'"
+          @open-roles="profileView = 'roles'"
+          @logout="logout"
+          @back-main="profileView = 'main'; resetProductForm()"
+          @update-product-field="updateProductFormField"
+          @save-product="saveProduct"
+          @reset-product="resetProductForm"
+          @edit-product="startEditProduct"
+          @remove-product="removeProduct"
+          @toggle-permission="toggleRolePermission"
+          @save-permissions="saveRolePermissions"
+          @refresh-users="loadRoleUsers"
+          @update-user-role="updateRoleUserDraft"
+          @change-user-role="changeUserRole"
+        />
 
         <div v-else-if="activeTab === 'schedule' && canAccessSchedule" class="page-fade">
           <ScheduleView
@@ -862,201 +844,3 @@ onBeforeUnmount(() => {
     </template>
   </div>
 </template>
-
-<style>
-html {
-  --app-safe-bottom: env(safe-area-inset-bottom);
-  --app-nav-bottom: calc(0.35rem + var(--app-safe-bottom));
-}
-
-@media (display-mode: standalone), (display-mode: fullscreen) {
-  html {
-    --app-safe-bottom: 0px;
-    --app-nav-bottom: 0.35rem;
-  }
-}
-
-html.is-standalone-pwa {
-  --app-safe-bottom: 0px;
-  --app-nav-bottom: 0.35rem;
-}
-
-::-webkit-scrollbar {
-  display: none;
-}
-
-* {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  -webkit-tap-highlight-color: transparent;
-  outline: none;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
-}
-
-body {
-  background-color: #f8fafc;
-  touch-action: pan-x pan-y;
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-  overscroll-behavior: none;
-}
-
-button,
-input,
-select,
-textarea {
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
-}
-
-button {
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-input,
-select,
-textarea {
-  -webkit-appearance: none;
-  appearance: none;
-  border-radius: 0;
-}
-
-@supports (-webkit-touch-callout: none) {
-  input,
-  select,
-  textarea {
-    font-size: 16px !important;
-  }
-}
-
-.pb-safe {
-  padding-bottom: var(--app-safe-bottom);
-}
-
-.pt-safe {
-  padding-top: calc(0.75rem + env(safe-area-inset-top));
-}
-
-.nav-safe {
-  min-height: calc(4rem + var(--app-safe-bottom));
-}
-
-.sheet-safe {
-  padding-bottom: calc(1rem + var(--app-safe-bottom));
-}
-
-.sheet-max {
-  max-height: calc(100vh - env(safe-area-inset-top) - 0.75rem);
-  max-height: calc(100dvh - env(safe-area-inset-top) - 0.75rem);
-}
-
-.pb-24 {
-  padding-bottom: calc(6rem + var(--app-safe-bottom));
-}
-
-@keyframes swing {
-  0%,
-  100% {
-    transform: rotate(0);
-  }
-  20% {
-    transform: rotate(10deg);
-  }
-  40% {
-    transform: rotate(-10deg);
-  }
-  60% {
-    transform: rotate(5deg);
-  }
-  80% {
-    transform: rotate(-5deg);
-  }
-}
-
-.animate-swing {
-  animation: swing 2s infinite;
-}
-
-.page-fade {
-  animation: page-fade-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.page-stack > * {
-  animation: page-item-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.page-stack > *:nth-child(1) {
-  animation-delay: 20ms;
-}
-
-.page-stack > *:nth-child(2) {
-  animation-delay: 60ms;
-}
-
-.page-stack > *:nth-child(3) {
-  animation-delay: 100ms;
-}
-
-.page-stack > *:nth-child(4) {
-  animation-delay: 140ms;
-}
-
-.page-stack > *:nth-child(5) {
-  animation-delay: 180ms;
-}
-
-@keyframes page-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes page-item-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.992);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.header-title-enter-active,
-.header-title-leave-active,
-.header-actions-enter-active,
-.header-actions-leave-active {
-  transition:
-    opacity 160ms ease,
-    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.header-title-enter-from,
-.header-title-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
-
-.header-title-enter-to,
-.header-title-leave-from,
-.header-actions-enter-to,
-.header-actions-leave-from {
-  opacity: 1;
-  transform: translate(0);
-}
-
-.header-actions-enter-from,
-.header-actions-leave-to {
-  opacity: 0;
-  transform: translateX(8px);
-}
-</style>

@@ -6,12 +6,13 @@ Short, stable facts only. Load this first; open detailed notes only when the tas
 - Stack: Vue 3 + Vite + Tailwind + Node http + PostgreSQL + Web Push.
 - Prod: `https://restosmena.ru` on server `194.67.121.51`.
 - Main deploy script: `scripts/update-production.sh`.
-- Key runtime files: `server/index.js`, `server/auth.js`, `server/db.js`, `server/notifications.js`, `server/push.js`, `src/navigation.js`, `src/permissions.js`.
+- Key runtime files: `server/index.js`, `server/routes/*`, `server/auth.js`, `server/db.js`, `server/notifications.js`, `server/push.js`, `src/navigation.js`, `src/permissions.js`.
 - Detailed notes: Obsidian vault `Проекты/Kofeyny`.
 - Workflow rule: after each code change, commit, push, then run `/opt/kofeteriy/app/scripts/update-production.sh`; check logs only if something fails.
 - Decomposition rule: target files around 200 lines when practical; if a file grows past about 400 lines, split it by responsibility unless there is a clear reason not to.
+- Reminder: big long files are bad; split them early.
 - Token rule: use `rg` and narrow ranges; avoid full-file reads for large files unless required.
-- Largest files to avoid reading wholesale: `server/index.js`, `src/components/ScheduleView.vue`, `src/App.vue`, `src/components/AdminArchive.vue`.
+- Largest files to avoid reading wholesale: `src/components/ScheduleView.vue`, `src/App.vue`, `src/components/AdminArchive.vue`, `server/routes/shift-routes.js`.
 
 ## What to check after code changes
 

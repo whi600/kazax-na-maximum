@@ -50,7 +50,8 @@ export const listArchiveRecordsStatement = db.prepare(`
     dr.arrival,
     dr.remainder,
     dr.write_off,
-    p.name AS product_name
+    p.name AS product_name,
+    p.category AS product_category
   FROM daily_records dr
   JOIN products p ON p.id = dr.product_id
   ORDER BY dr.record_date DESC, p.name ASC

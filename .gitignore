@@ -16,6 +16,7 @@ data/uploads/*
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
+data/push-vapid-keys.json
 
 # Editor directories and files
 .vscode/*
