@@ -55,6 +55,8 @@ const selectedWeekStart = ref('')
 
 const pendingDeleteIds = ref([])
 const unsavedNewShifts = ref([])
+const recentNewShiftIds = ref([])
+const dismissedNewShiftIds = ref([])
 const isSaving = ref(false)
 const structureSaveStatus = ref('idle')
 const scheduleCollabStatus = ref({
@@ -282,6 +284,18 @@ const makeTempShift = ({ date, start_time, end_time }) => ({
   employee_name: null,
 })
 
+const isNewShift = (shift) => {
+  const id = Number(shift?.id)
+  if (!Number.isFinite(id) || dismissedNewShiftIds.value.includes(id)) return false
+  return id < 0 || recentNewShiftIds.value.includes(id)
+}
+
+const markShiftInteracted = (shift) => {
+  const id = Number(shift?.id)
+  if (!Number.isFinite(id) || dismissedNewShiftIds.value.includes(id)) return
+  dismissedNewShiftIds.value = [...dismissedNewShiftIds.value, id]
+}
+
 const fetchShifts = async () => {
   suppressStructureAutosave = true
   try {
@@ -474,7 +488,7 @@ const deleteWeek = (weekStart) => {
     return
   }
 
-  safeConfirm(`Удалить всю неделю ${formatWeekRange(weekStart)}?`, (ok) => {
+  safeConfirm(`Удалить всю неделю ${formatWeekRange(weekStart)}?`, async (ok) => {
     if (!ok) return
 
     unsavedNewShifts.value = unsavedNewShifts.value.filter(
@@ -493,6 +507,8 @@ const deleteWeek = (weekStart) => {
       const remainingWeeks = weekStarts.value.filter((item) => item !== weekStart)
       selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
     }
+
+    await saveStructure({ silent: true })
   })
 }
 
@@ -514,6 +530,7 @@ const addNextWeekTemplate = () => {
 
 const bookShift = (shift) => {
   if (shift.employee_name) return
+  markShiftInteracted(shift)
 
   safeConfirm(`Записаться на смену ${shift.start_time}-${shift.end_time}?`, async (ok) => {
     if (!ok) return
@@ -528,6 +545,8 @@ const bookShift = (shift) => {
 }
 
 const cancelBooking = (shift) => {
+  markShiftInteracted(shift)
+
   if (isCurrentUserShift(shift) && isShiftPast(shift)) {
     safeAlert('Нельзя снять запись с прошедшей смены')
     return
@@ -558,6 +577,7 @@ const openModal = (date = null, isHelp = false) => {
 
 const openEditModal = (shift) => {
   if (!canManageSchedule.value || !shift) return
+  markShiftInteracted(shift)
 
   isExtraShift.value = false
   editingShiftId.value = shift.id
@@ -659,6 +679,8 @@ const handleSaveModal = async () => {
 }
 
 const markForDeletion = (shift) => {
+  markShiftInteracted(shift)
+
   safeConfirm('Удалить эту смену из расписания?', (ok) => {
     if (!ok) return
 
@@ -704,7 +726,7 @@ const saveStructure = async ({ silent = false } = {}) => {
   setStructureSaveStatus('saving')
 
   try {
-    await shiftsApi.bulkSave({
+    const response = await shiftsApi.bulkSave({
       deletedIds: [...pendingDeleteIds.value],
       newShifts: unsavedNewShifts.value.map(({ date, start_time, end_time }) => ({
         date,
@@ -714,6 +736,15 @@ const saveStructure = async ({ silent = false } = {}) => {
     })
 
     await fetchShifts()
+    const createdIds = Array.isArray(response?.createdIds)
+      ? response.createdIds.map(Number).filter(Number.isFinite)
+      : []
+    if (createdIds.length > 0) {
+      const existing = recentNewShiftIds.value.filter(
+        (id) => !dismissedNewShiftIds.value.includes(id),
+      )
+      recentNewShiftIds.value = Array.from(new Set([...existing, ...createdIds]))
+    }
     setStructureSaveStatus('saved')
   } catch (error) {
     setStructureSaveStatus('error')
@@ -911,7 +942,7 @@ onBeforeUnmount(() => {
                   >
                     {{ shift.start_time }}–{{ shift.end_time }}
                   </span>
-                  <span v-if="shift.id < 0" class="text-[8px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase">
+                  <span v-if="isNewShift(shift)" class="text-[8px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase">
                     New
                   </span>
                 </div>

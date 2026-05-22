@@ -730,7 +730,7 @@ const appServer = http.createServer((req, res) => {
         })
       }
 
-      json(res, 200, { ok: true })
+      json(res, 200, { ok: true, createdIds })
       return
     }
 
