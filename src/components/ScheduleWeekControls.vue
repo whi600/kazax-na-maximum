@@ -19,12 +19,13 @@ const emit = defineEmits(['select-week', 'hold-week', 'cancel-hold', 'add-week']
         v-for="weekStart in weekStarts"
         :key="weekStart"
         @click="emit('select-week', weekStart)"
-        @pointerdown="emit('hold-week', weekStart)"
+        @pointerdown.prevent="emit('hold-week', weekStart)"
         @pointerup="emit('cancel-hold')"
         @pointerleave="emit('cancel-hold')"
         @pointercancel="emit('cancel-hold')"
         @contextmenu.prevent
-        class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all"
+        class="shrink-0 select-none rounded-lg px-3 py-2 border text-left transition-all"
+        style="-webkit-user-select: none; user-select: none; -webkit-touch-callout: none;"
         :class="
           weekStart === selectedWeekStart
             ? 'bg-slate-900 text-white border-slate-900'

@@ -5,9 +5,12 @@ export const recordCategorySections = [
 ]
 
 export const parseDate = (dateStr) => {
-  const [year, month, day] = String(dateStr || '').split('-').map(Number)
-  if (!year || !month || !day) return new Date()
-  return new Date(year, month - 1, day)
+  const [year, month, rawDay] = String(dateStr || '').slice(0, 10).split('-')
+  const day = Number(rawDay)
+  const parsedYear = Number(year)
+  const parsedMonth = Number(month)
+  if (!parsedYear || !parsedMonth || !day) return new Date()
+  return new Date(parsedYear, parsedMonth - 1, day)
 }
 
 export const formatDateLabel = (dateStr) => {

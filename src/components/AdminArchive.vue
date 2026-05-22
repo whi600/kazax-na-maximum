@@ -79,6 +79,7 @@ const employees = computed(() => {
 
 const filteredShifts = computed(() =>
   baseShifts.value.filter((shift) => {
+    if (!shift?.date || !shift?.employee_name) return false
     if (selectedEmployee.value === 'all') return true
     return shift.employee_name === selectedEmployee.value
   }),
@@ -94,7 +95,12 @@ const groupedShiftHistory = computed(() => {
   const map = new Map()
 
   sorted.forEach((shift) => {
+    if (!shift?.date) return
+    if (!/^\d{4}-\d{2}-\d{2}/.test(String(shift.date))) return
+
     const date = parseDate(shift.date)
+    if (Number.isNaN(date.getTime())) return
+
     const label = date.toLocaleDateString('ru-RU', {
       month: 'long',
       year: 'numeric',
@@ -282,7 +288,9 @@ const loadShifts = async () => {
 
   try {
     const response = await shiftsApi.archive()
-    shifts.value = response.shifts || []
+    shifts.value = (response.shifts || []).filter(
+      (shift) => shift?.date && shift?.start_time && shift?.end_time,
+    )
   } catch (error) {
     safeAlert(error?.message || 'Ошибка загрузки смен')
   } finally {

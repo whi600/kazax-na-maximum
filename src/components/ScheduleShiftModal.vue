@@ -47,18 +47,17 @@ const emit = defineEmits([
               </p>
 
               <div class="space-y-4">
-                <label
-                  class="relative w-full overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 text-left transition-colors active:bg-slate-100"
-                >
+                <label class="block rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
                   <span class="mb-2 block text-[10px] font-black uppercase text-slate-400">Выберите дату</span>
-                  <span class="block text-base font-bold text-slate-900">{{ formattedDate }}</span>
                   <input
                     type="date"
                     :value="date"
                     :min="new Date().toISOString().slice(0, 10)"
-                    class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                    class="block w-full rounded-xl border border-slate-100 bg-white px-3 py-3 text-base font-bold text-slate-900 outline-none focus:border-blue-300"
                     @input="emit('update:date', $event.target.value)"
+                    @change="emit('update:date', $event.target.value)"
                   />
+                  <span class="mt-2 block text-[11px] font-bold text-slate-400">{{ formattedDate }}</span>
                 </label>
 
                 <div class="grid grid-cols-2 gap-4">
