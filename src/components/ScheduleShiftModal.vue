@@ -1,5 +1,4 @@
 <script setup>
-import { ref } from 'vue'
 import { X } from 'lucide-vue-next'
 
 defineProps({
@@ -15,44 +14,10 @@ defineProps({
 const emit = defineEmits([
   'close',
   'submit',
-  'open-date-picker',
   'update:date',
   'update:startTime',
   'update:endTime',
 ])
-
-const dateInput = ref(null)
-const startTimeInput = ref(null)
-const endTimeInput = ref(null)
-
-const openPicker = (inputRef) => {
-  const input = inputRef?.value
-  if (!input) return
-
-  if (typeof input.showPicker === 'function') {
-    input.showPicker()
-    return
-  }
-
-  if (typeof input.focus === 'function') input.focus()
-  if (typeof input.click === 'function') input.click()
-}
-
-const openDatePicker = () => {
-  const input = dateInput.value
-  if (!input) {
-    emit('open-date-picker')
-    return
-  }
-
-  if (typeof input.showPicker === 'function') {
-    input.showPicker()
-    return
-  }
-
-  if (typeof input.focus === 'function') input.focus()
-  if (typeof input.click === 'function') input.click()
-}
 
 </script>
 
@@ -82,30 +47,26 @@ const openDatePicker = () => {
               </p>
 
               <div class="space-y-4">
-                <button
-                  type="button"
+                <label
                   class="relative w-full overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 text-left transition-colors active:bg-slate-100"
-                  @click="openDatePicker"
                 >
                   <span class="mb-2 block text-[10px] font-black uppercase text-slate-400">Выберите дату</span>
                   <span class="block text-base font-bold text-slate-900">{{ formattedDate }}</span>
                   <input
-                    ref="dateInput"
                     type="date"
                     :value="date"
-                    class="pointer-events-none absolute inset-0 z-10 h-full w-full appearance-none opacity-0"
-                    @change="emit('update:date', $event.target.value)"
+                    :min="new Date().toISOString().slice(0, 10)"
+                    class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                    @input="emit('update:date', $event.target.value)"
                   />
-                </button>
+                </label>
 
                 <div class="grid grid-cols-2 gap-4">
                   <div
                     class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
-                    @click="openPicker(startTimeInput)"
                   >
                     <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Начало</label>
                     <input
-                      ref="startTimeInput"
                       type="time"
                       :value="startTime"
                       class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"
@@ -114,11 +75,9 @@ const openDatePicker = () => {
                   </div>
                   <div
                     class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
-                    @click="openPicker(endTimeInput)"
                   >
                     <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Конец</label>
                     <input
-                      ref="endTimeInput"
                       type="time"
                       :value="endTime"
                       class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"

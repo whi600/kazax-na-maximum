@@ -77,8 +77,9 @@ const canManageProducts = computed(() => Boolean(userPermissions.value.productsM
 const canManageSchedule = computed(() => Boolean(userPermissions.value.scheduleManage))
 const canViewAudit = computed(() => Boolean(userPermissions.value.auditView))
 const canManageRoles = computed(() => Boolean(userPermissions.value.rolesManage))
+const isChef = computed(() => userRole.value === 'chef')
 const canAccessSchedule = computed(() => userRole.value !== 'chef')
-const canAccessArchive = computed(() => canViewAudit.value && userRole.value !== 'chef')
+const canAccessArchive = computed(() => isChef.value || canViewAudit.value)
 
 const pageTitle = computed(() => {
   if (activeTab.value === 'schedule') return 'График'
@@ -97,10 +98,12 @@ const pageTitle = computed(() => {
 })
 
 const navItems = computed(() =>
-  buildNavItems({
-    canAccessSchedule: canAccessSchedule.value,
-    canAccessArchive: canAccessArchive.value,
-  }),
+  isChef.value
+    ? [{ tab: 'archive', label: 'Архив', icon: 'archive' }]
+    : buildNavItems({
+        canAccessSchedule: canAccessSchedule.value,
+        canAccessArchive: canAccessArchive.value,
+      }),
 )
 
 const updateRoute = (tab, replace = false) => {
@@ -114,6 +117,13 @@ const updateRoute = (tab, replace = false) => {
 }
 
 const navigateTo = (tab, replace = false) => {
+  if (isChef.value) {
+    activeTab.value = 'archive'
+    profileView.value = 'main'
+    updateRoute('archive', replace)
+    return
+  }
+
   const nextTab =
     (tab === 'archive' && !canAccessArchive.value) ||
     (tab === 'schedule' && !canAccessSchedule.value)
@@ -647,16 +657,12 @@ const openScheduleRequests = () => {
   scheduleViewRef.value?.openPendingRequests()
 }
 
-const closeKeyboard = (event) => {
-  const targetTag = event.target?.tagName
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(targetTag)) return
+watch([isChef, canAccessArchive, canAccessSchedule], ([chef, archiveAllowed, scheduleAllowed]) => {
+  if (chef && activeTab.value !== 'archive') {
+    navigateTo('archive', true)
+    return
+  }
 
-  const activeTag = document.activeElement?.tagName
-  if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)) return
-  document.activeElement?.blur()
-}
-
-watch([canAccessArchive, canAccessSchedule], ([archiveAllowed, scheduleAllowed]) => {
   if (
     (activeTab.value === 'archive' && !archiveAllowed) ||
     (activeTab.value === 'schedule' && !scheduleAllowed)
@@ -718,8 +724,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="min-h-screen min-h-[100dvh] bg-slate-50 text-slate-800 pb-24 select-none touch-manipulation"
-    @click="closeKeyboard"
+    class="min-h-screen min-h-[100dvh] bg-slate-50 text-slate-800 pb-24 touch-manipulation"
   >
     <div v-if="authLoading" class="flex min-h-screen min-h-[100dvh] items-center justify-center">
       <RotateCw class="w-7 h-7 animate-spin text-blue-600" />
@@ -805,9 +810,9 @@ onBeforeUnmount(() => {
         <div v-else>
           <div v-if="activeTab === 'archive' && canAccessArchive" class="page-fade">
             <AdminArchive
-              lockedMode=""
-              :hideToggle="false"
-              :canViewAudit="canViewAudit"
+              :lockedMode="isChef ? 'records' : ''"
+              :hideToggle="isChef"
+              :canViewAudit="!isChef && canViewAudit"
             />
           </div>
 
@@ -815,7 +820,7 @@ onBeforeUnmount(() => {
             v-else
             :products="products"
             :daily-entries="dailyEntries"
-            :editable="canEditReport"
+            :editable="canEditReport && !isChef"
             @add-product="onAddProduct"
             @remove-entry="removeReportEntry"
           />

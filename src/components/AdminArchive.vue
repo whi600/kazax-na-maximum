@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { recordsApi, shiftsApi } from '../api'
 import { Calendar, Clock, User } from 'lucide-vue-next'
-import DatePickerSheet from './DatePickerSheet.vue'
+import NativeDateButton from './NativeDateButton.vue'
 import {
   buildRecordsDaySections,
   formatAuditAction,
@@ -46,7 +46,6 @@ const auditLoaded = ref(false)
 const selectedEmployee = ref('all')
 const periodStart = ref('')
 const periodEnd = ref('')
-const activeDatePicker = ref('')
 const visibleRecordDays = ref(5)
 const recordsLoadMoreRef = ref(null)
 let recordsLoadObserver = null
@@ -203,17 +202,6 @@ const visibleRecordsDaySections = computed(() =>
 const hasMoreRecordDays = computed(
   () => visibleRecordsDaySections.value.length < recordsDaySections.value.length,
 )
-
-const updateActiveDate = (date) => {
-  if (activeDatePicker.value === 'start') {
-    periodStart.value = date
-    return
-  }
-
-  if (activeDatePicker.value === 'end') {
-    periodEnd.value = date
-  }
-}
 
 const loadRecords = async () => {
   recordsLoading.value = true
@@ -515,20 +503,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="grid grid-cols-2 gap-2">
-          <label
-            class="bg-slate-50 rounded-xl px-2.5 py-2 border border-slate-100 cursor-pointer"
-            @click.prevent="activeDatePicker = 'start'"
-          >
-            <span class="block text-[9px] font-black uppercase text-slate-400 mb-1">Начало</span>
-            <span class="block text-[11px] font-bold text-slate-800">{{ formatDateLabel(periodStart) }}</span>
-          </label>
-          <label
-            class="bg-slate-50 rounded-xl px-2.5 py-2 border border-slate-100 cursor-pointer"
-            @click.prevent="activeDatePicker = 'end'"
-          >
-            <span class="block text-[9px] font-black uppercase text-slate-400 mb-1">Конец</span>
-            <span class="block text-[11px] font-bold text-slate-800">{{ formatDateLabel(periodEnd) }}</span>
-          </label>
+          <NativeDateButton
+            v-model="periodStart"
+            label="Начало"
+            :display-value="formatDateLabel(periodStart)"
+          />
+          <NativeDateButton
+            v-model="periodEnd"
+            label="Конец"
+            :display-value="formatDateLabel(periodEnd)"
+          />
         </div>
       </div>
 
@@ -634,12 +618,5 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <DatePickerSheet
-      v-if="activeDatePicker"
-      :modelValue="activeDatePicker === 'start' ? periodStart : periodEnd"
-      :title="activeDatePicker === 'start' ? 'Начало периода' : 'Конец периода'"
-      @update:modelValue="updateActiveDate"
-      @close="activeDatePicker = ''"
-    />
   </div>
 </template>

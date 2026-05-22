@@ -16,7 +16,6 @@ import {
   pickMissingTemplateShifts,
   toDateKey,
 } from '../scheduleUtils'
-import DatePickerSheet from './DatePickerSheet.vue'
 import {
   Calendar,
   Bell,
@@ -47,7 +46,6 @@ const isExtraShift = ref(false)
 const editingShiftId = ref(null)
 const currentUserName = ref('Сотрудник')
 const showPendingSheet = ref(false)
-const showDatePicker = ref(false)
 const selectedWeekStart = ref('')
 
 const pendingDeleteIds = ref([])
@@ -86,7 +84,7 @@ const canManageSchedule = computed(
 )
 
 const isAnyOverlayOpen = computed(
-  () => isModalOpen.value || showDatePicker.value || showPendingSheet.value,
+  () => isModalOpen.value || showPendingSheet.value,
 )
 
 const setStructureSaveStatus = (status) => {
@@ -476,7 +474,9 @@ const deleteWeek = (weekStart) => {
   if (!canManageSchedule.value) return
 
   const weekDateSet = new Set(getWeekDates(weekStart))
-  const hasBookedShift = approvedShifts.value.some(
+  const weekServerShifts = shifts.value.filter((shift) => weekDateSet.has(shift.date))
+  const weekUnsavedShifts = unsavedNewShifts.value.filter((shift) => weekDateSet.has(shift.date))
+  const hasBookedShift = [...weekServerShifts, ...weekUnsavedShifts].some(
     (shift) => weekDateSet.has(shift.date) && Boolean(shift.employee_name),
   )
 
@@ -492,8 +492,8 @@ const deleteWeek = (weekStart) => {
       (shift) => !weekDateSet.has(shift.date),
     )
 
-    approvedShifts.value.forEach((shift) => {
-      if (weekDateSet.has(shift.date) && shift.id > 0) {
+    weekServerShifts.forEach((shift) => {
+      if (shift.id > 0) {
         if (!pendingDeleteIds.value.includes(shift.id)) {
           pendingDeleteIds.value = [...pendingDeleteIds.value, shift.id]
         }
@@ -587,7 +587,6 @@ const openEditModal = (shift) => {
 }
 
 const closeModal = () => {
-  showDatePicker.value = false
   editingShiftId.value = null
   isExtraShift.value = false
   isModalOpen.value = false
@@ -926,18 +925,9 @@ onBeforeUnmount(() => {
       :end-time="form.end_time"
       @close="closeModal"
       @submit="handleSaveModal"
-      @open-date-picker="showDatePicker = true"
       @update:date="form.date = $event"
       @update:start-time="form.start_time = $event"
       @update:end-time="form.end_time = $event"
-    />
-
-    <DatePickerSheet
-      v-if="showDatePicker"
-      v-model="form.date"
-      title="Дата смены"
-      :minDate="toDateKey(new Date())"
-      @close="showDatePicker = false"
     />
 
     <SchedulePendingRequestsSheet
