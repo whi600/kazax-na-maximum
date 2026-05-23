@@ -308,6 +308,46 @@ const migrations = [
         DROP COLUMN IF EXISTS messages_enabled;
     `,
   },
+  {
+    name: '011_schedule_template_shifts',
+    sql: `
+      CREATE TABLE IF NOT EXISTS schedule_template_shifts (
+        id SERIAL PRIMARY KEY,
+        day_index INTEGER NOT NULL CHECK(day_index BETWEEN 0 AND 6),
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_schedule_template_day_order
+        ON schedule_template_shifts(day_index, sort_order, start_time);
+
+      INSERT INTO schedule_template_shifts(day_index, start_time, end_time, sort_order)
+      SELECT *
+      FROM (
+        VALUES
+          (0, '09:00', '15:00', 0),
+          (0, '14:00', '21:00', 1),
+          (1, '09:00', '15:00', 0),
+          (1, '14:00', '21:00', 1),
+          (2, '09:00', '15:00', 0),
+          (2, '14:00', '21:00', 1),
+          (3, '09:00', '15:00', 0),
+          (3, '14:00', '21:00', 1),
+          (4, '09:00', '15:00', 0),
+          (4, '14:00', '21:00', 1),
+          (5, '09:00', '15:00', 0),
+          (5, '14:00', '21:00', 1),
+          (6, '09:00', '15:00', 0),
+          (6, '09:00', '15:00', 1),
+          (6, '14:00', '21:00', 2),
+          (6, '14:00', '21:00', 3)
+      ) AS default_rows(day_index, start_time, end_time, sort_order)
+      WHERE NOT EXISTS (SELECT 1 FROM schedule_template_shifts);
+    `,
+  },
 ]
 
 const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()

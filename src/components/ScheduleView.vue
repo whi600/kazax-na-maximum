@@ -4,6 +4,7 @@ import { editingApi, shiftsApi } from '../api'
 import {
   addDays,
   createDefaultWeekTemplate,
+  DEFAULT_WEEK_TEMPLATE_SHIFTS,
   formatDateHeader,
   formatDateInput,
   formatWeekDay,
@@ -42,6 +43,7 @@ const emit = defineEmits(['pending-count'])
 
 const shifts = ref([])
 const loading = ref(true)
+const scheduleTemplateShifts = ref([])
 const isModalOpen = ref(false)
 const isExtraShift = ref(false)
 const editingShiftId = ref(null)
@@ -292,6 +294,15 @@ const markShiftInteracted = (shift) => {
   dismissedNewShiftIds.value = [...dismissedNewShiftIds.value, id]
 }
 
+const loadScheduleTemplate = async () => {
+  try {
+    const response = await shiftsApi.template()
+    scheduleTemplateShifts.value = response.shifts || []
+  } catch {
+    scheduleTemplateShifts.value = DEFAULT_WEEK_TEMPLATE_SHIFTS
+  }
+}
+
 const fetchShifts = async () => {
   suppressStructureAutosave = true
   try {
@@ -307,8 +318,8 @@ const fetchShifts = async () => {
       const currentWeek = getCurrentWeekStart()
       const nextWeek = getNextWeekStart(currentWeek)
       const defaults = [
-        ...createDefaultWeekTemplate(currentWeek),
-        ...createDefaultWeekTemplate(nextWeek),
+        ...createDefaultWeekTemplate(currentWeek, scheduleTemplateShifts.value),
+        ...createDefaultWeekTemplate(nextWeek, scheduleTemplateShifts.value),
       ]
 
       await shiftsApi.bulkSave({
@@ -357,6 +368,7 @@ const fetchShifts = async () => {
 const initialize = async () => {
   loading.value = true
   resolveUserName()
+  await loadScheduleTemplate()
   await fetchShifts()
   loading.value = false
 }
@@ -515,7 +527,11 @@ const addNextWeekTemplate = () => {
 
   const lastWeek = weekStarts.value[weekStarts.value.length - 1] || getCurrentWeekStart()
   const nextWeek = getNextWeekStart(lastWeek)
-  const missing = pickMissingTemplateShifts([nextWeek], approvedShifts.value)
+  const missing = pickMissingTemplateShifts(
+    [nextWeek],
+    approvedShifts.value,
+    scheduleTemplateShifts.value,
+  )
 
   if (missing.length === 0) {
     selectedWeekStart.value = nextWeek

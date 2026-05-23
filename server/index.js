@@ -17,6 +17,7 @@ import { handleAdminRoutes } from './routes/admin-routes.js'
 import { handleAuthRoutes } from './routes/auth-routes.js'
 import { handleNotificationRoutes } from './routes/notification-routes.js'
 import { handleProductRecordRoutes } from './routes/product-record-routes.js'
+import { handleScheduleTemplateRoutes } from './routes/schedule-template-routes.js'
 import { handleShiftRoutes } from './routes/shift-routes.js'
 
 const HOST = process.env.HOST || '0.0.0.0'
@@ -63,6 +64,10 @@ const appServer = http.createServer((req, res) => {
     }
 
     if (await handleShiftRoutes({ req, res, pathname, db })) {
+      return
+    }
+
+    if (await handleScheduleTemplateRoutes({ req, res, pathname, db })) {
       return
     }
 

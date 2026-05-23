@@ -93,6 +93,9 @@ const pageTitle = computed(() => {
   if (activeTab.value === 'profile' && profileView.value === 'notifications') {
     return 'Уведомления'
   }
+  if (activeTab.value === 'profile' && profileView.value === 'schedule-template') {
+    return 'Базовое расписание'
+  }
   if (activeTab.value === 'profile') return 'Профиль'
   return 'Отчет'
 })
@@ -678,7 +681,7 @@ watch(
   },
 )
 
-watch(profileView, (view) => {
+watch([profileView, canManageProducts, canManageRoles, canManageSchedule], ([view]) => {
   if (view === 'assortment' && !canManageProducts.value) {
     profileView.value = 'main'
     return
@@ -690,6 +693,9 @@ watch(profileView, (view) => {
     }
     loadRolePermissions()
     loadRoleUsers()
+  }
+  if (view === 'schedule-template' && !canManageSchedule.value) {
+    profileView.value = 'main'
   }
 })
 
@@ -762,6 +768,7 @@ onBeforeUnmount(() => {
           :email="currentUser?.email"
           :role-label="roleLabels[userRole] || userRole"
           :can-manage-products="canManageProducts"
+          :can-manage-schedule="canManageSchedule"
           :can-manage-roles="canManageRoles"
           :products="products"
           :product-form="productForm"
@@ -781,6 +788,7 @@ onBeforeUnmount(() => {
           :super-admin-email="SUPER_ADMIN_EMAIL"
           @open-assortment="profileView = 'assortment'"
           @open-notifications="profileView = 'notifications'"
+          @open-schedule-template="profileView = 'schedule-template'"
           @open-roles="profileView = 'roles'"
           @logout="logout"
           @back-main="profileView = 'main'; resetProductForm()"

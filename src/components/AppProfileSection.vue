@@ -3,6 +3,7 @@ import AssortmentEditorView from './AssortmentEditorView.vue'
 import NotificationSettingsView from './NotificationSettingsView.vue'
 import ProfileHomeView from './ProfileHomeView.vue'
 import RoleSettingsView from './RoleSettingsView.vue'
+import ScheduleTemplateEditorView from './ScheduleTemplateEditorView.vue'
 
 defineProps({
   profileView: { type: String, required: true },
@@ -10,6 +11,7 @@ defineProps({
   email: { type: String, default: '' },
   roleLabel: { type: String, default: '' },
   canManageProducts: { type: Boolean, default: false },
+  canManageSchedule: { type: Boolean, default: false },
   canManageRoles: { type: Boolean, default: false },
   products: { type: Array, default: () => [] },
   productForm: { type: Object, required: true },
@@ -32,6 +34,7 @@ defineProps({
 const emit = defineEmits([
   'open-assortment',
   'open-notifications',
+  'open-schedule-template',
   'open-roles',
   'logout',
   'back-main',
@@ -56,9 +59,11 @@ const emit = defineEmits([
       :email="email"
       :role-label="roleLabel"
       :can-manage-products="canManageProducts"
+      :can-manage-schedule="canManageSchedule"
       :can-manage-roles="canManageRoles"
       @open-assortment="emit('open-assortment')"
       @open-notifications="emit('open-notifications')"
+      @open-schedule-template="emit('open-schedule-template')"
       @open-roles="emit('open-roles')"
       @logout="emit('logout')"
     />
@@ -82,6 +87,11 @@ const emit = defineEmits([
       @reset="emit('reset-product')"
       @edit-product="emit('edit-product', $event)"
       @remove-product="emit('remove-product', $event)"
+    />
+
+    <ScheduleTemplateEditorView
+      v-else-if="profileView === 'schedule-template'"
+      @back="emit('back-main')"
     />
 
     <RoleSettingsView

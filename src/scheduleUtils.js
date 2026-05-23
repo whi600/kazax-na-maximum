@@ -75,29 +75,48 @@ export const isPastDate = (dateStr) => {
   return dateStr < today
 }
 
-export const createDefaultWeekTemplate = (weekStart) => {
+export const DEFAULT_WEEK_TEMPLATE_SHIFTS = [
+  { day_index: 0, start_time: '09:00', end_time: '15:00' },
+  { day_index: 0, start_time: '14:00', end_time: '21:00' },
+  { day_index: 1, start_time: '09:00', end_time: '15:00' },
+  { day_index: 1, start_time: '14:00', end_time: '21:00' },
+  { day_index: 2, start_time: '09:00', end_time: '15:00' },
+  { day_index: 2, start_time: '14:00', end_time: '21:00' },
+  { day_index: 3, start_time: '09:00', end_time: '15:00' },
+  { day_index: 3, start_time: '14:00', end_time: '21:00' },
+  { day_index: 4, start_time: '09:00', end_time: '15:00' },
+  { day_index: 4, start_time: '14:00', end_time: '21:00' },
+  { day_index: 5, start_time: '09:00', end_time: '15:00' },
+  { day_index: 5, start_time: '14:00', end_time: '21:00' },
+  { day_index: 6, start_time: '09:00', end_time: '15:00' },
+  { day_index: 6, start_time: '09:00', end_time: '15:00' },
+  { day_index: 6, start_time: '14:00', end_time: '21:00' },
+  { day_index: 6, start_time: '14:00', end_time: '21:00' },
+]
+
+export const normalizeTemplateShift = (shift) => ({
+  day_index: Number(shift?.day_index ?? shift?.dayIndex ?? 0),
+  start_time: String(shift?.start_time || '09:00'),
+  end_time: String(shift?.end_time || '18:00'),
+})
+
+export const createDefaultWeekTemplate = (
+  weekStart,
+  templateShifts = DEFAULT_WEEK_TEMPLATE_SHIFTS,
+) => {
   const start = parseDate(weekStart)
   const result = []
 
-  for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
-    const date = toDateKey(addDays(start, dayIndex))
-    const slots =
-      dayIndex === 6
-        ? [
-            ['09:00', '15:00'],
-            ['09:00', '15:00'],
-            ['14:00', '21:00'],
-            ['14:00', '21:00'],
-          ]
-        : [
-            ['09:00', '15:00'],
-            ['14:00', '21:00'],
-          ]
-
-    slots.forEach(([start_time, end_time]) => {
-      result.push({ date, start_time, end_time })
+  templateShifts
+    .map(normalizeTemplateShift)
+    .filter((shift) => shift.day_index >= 0 && shift.day_index <= 6)
+    .forEach((shift) => {
+      result.push({
+        date: toDateKey(addDays(start, shift.day_index)),
+        start_time: shift.start_time,
+        end_time: shift.end_time,
+      })
     })
-  }
 
   return result
 }
@@ -111,12 +130,16 @@ const buildShiftCountMap = (shiftList) => {
   return counts
 }
 
-export const pickMissingTemplateShifts = (weekStartsList, shiftList) => {
+export const pickMissingTemplateShifts = (
+  weekStartsList,
+  shiftList,
+  templateShifts = DEFAULT_WEEK_TEMPLATE_SHIFTS,
+) => {
   const available = buildShiftCountMap(shiftList)
   const missing = []
 
   weekStartsList.forEach((weekStart) => {
-    createDefaultWeekTemplate(weekStart).forEach((templateShift) => {
+    createDefaultWeekTemplate(weekStart, templateShifts).forEach((templateShift) => {
       const key = `${templateShift.date}|${templateShift.start_time}|${templateShift.end_time}`
       const count = available.get(key) || 0
       if (count > 0) {

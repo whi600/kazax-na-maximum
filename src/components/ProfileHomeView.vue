@@ -1,6 +1,7 @@
 <script setup>
 import {
   BellRing,
+  CalendarClock,
   LogOut,
   Pencil,
   ShieldCheck,
@@ -13,10 +14,17 @@ defineProps({
   email: { type: String, default: '' },
   roleLabel: { type: String, default: '' },
   canManageProducts: { type: Boolean, default: false },
+  canManageSchedule: { type: Boolean, default: false },
   canManageRoles: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['open-assortment', 'open-notifications', 'open-roles', 'logout'])
+const emit = defineEmits([
+  'open-assortment',
+  'open-notifications',
+  'open-schedule-template',
+  'open-roles',
+  'logout',
+])
 </script>
 
 <template>
@@ -59,6 +67,16 @@ const emit = defineEmits(['open-assortment', 'open-notifications', 'open-roles',
       >
         <Pencil class="w-4 h-4" />
         Ассортимент
+      </button>
+
+      <button
+        v-if="canManageSchedule"
+        type="button"
+        @click="emit('open-schedule-template')"
+        class="w-full bg-slate-50 text-slate-700 py-3 rounded-lg text-[11px] font-black uppercase flex items-center justify-center gap-2 active:scale-95 transition-all border border-slate-100"
+      >
+        <CalendarClock class="w-4 h-4" />
+        Базовое расписание
       </button>
 
       <button

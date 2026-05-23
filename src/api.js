@@ -74,6 +74,12 @@ export const recordsApi = {
 export const shiftsApi = {
   upcoming: () => apiRequest('/api/shifts/upcoming', { method: 'GET' }),
   archive: () => apiRequest('/api/shifts/archive', { method: 'GET' }),
+  template: () => apiRequest('/api/schedule-template', { method: 'GET' }),
+  updateTemplate: (shifts) =>
+    apiRequest('/api/schedule-template', {
+      method: 'PUT',
+      body: JSON.stringify({ shifts }),
+    }),
   requestHelp: (payload) =>
     apiRequest('/api/shifts/help-request', {
       method: 'POST',
