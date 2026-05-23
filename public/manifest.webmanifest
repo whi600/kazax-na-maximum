@@ -1,6 +1,6 @@
 {
-  "name": "Кофетерий",
-  "short_name": "Кофетерий",
+  "name": "Кафетерий",
+  "short_name": "Кафетерий",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

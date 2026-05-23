@@ -4,6 +4,31 @@ export const recordCategorySections = [
   { key: 'other', label: 'Другое' },
 ]
 
+const normalizeRecordCategory = (record) => {
+  const category = String(record?.products?.category || record?.category || 'other')
+  if (category === 'pastry' || category === 'bakery') return category
+  return 'other'
+}
+
+const buildCategoryRows = ({ dateKey, rows, category }) => {
+  const categoryRows = rows.filter((record) => normalizeRecordCategory(record) === category.key)
+  if (categoryRows.length === 0) return []
+
+  return [
+    {
+      rowType: 'category',
+      id: `${dateKey}-${category.key}`,
+      categoryKey: category.key,
+      categoryLabel: category.label,
+    },
+    ...categoryRows.map((record) => ({
+      ...record,
+      rowType: 'record',
+      categoryKey: category.key,
+    })),
+  ]
+}
+
 export const parseDate = (dateStr) => {
   const [year, month, rawDay] = String(dateStr || '').slice(0, 10).split('-')
   const day = Number(rawDay)
@@ -112,13 +137,7 @@ export const buildRecordsDaySections = (recordsHistory) =>
     .sort(([a], [b]) => (a < b ? 1 : -1))
     .map(([dateKey, rows]) => {
       const groupedRows = recordCategorySections.flatMap((category) =>
-        rows
-          .filter((record) => (record.products?.category || 'other') === category.key)
-          .map((record, index) => ({
-            ...record,
-            categoryKey: category.key,
-            startsCategory: index === 0,
-          })),
+        buildCategoryRows({ dateKey, rows, category }),
       )
 
       return {
@@ -127,7 +146,7 @@ export const buildRecordsDaySections = (recordsHistory) =>
         weekDayLabel: formatRecordWeekday(dateKey),
         rows: groupedRows.map((record, index) => ({
           ...record,
-          hasCategoryDivider: record.startsCategory && index > 0,
+          hasCategoryDivider: record.rowType === 'category' && index > 0,
         })),
       }
     })

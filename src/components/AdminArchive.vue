@@ -435,14 +435,23 @@ onBeforeUnmount(() => {
                 v-for="record in section.rows"
                 :key="record.id"
                 :class="[
-                  'font-bold',
-                  record.hasCategoryDivider ? 'border-t-2 border-slate-300' : 'border-t border-slate-100',
+                  record.rowType === 'category' ? 'font-black' : 'font-bold',
+                  record.hasCategoryDivider ? 'border-t-[3px] border-slate-300' : 'border-t border-slate-100',
                 ]"
               >
-                <td class="px-2.5 py-3 leading-tight text-slate-900 border-r border-slate-100">{{ record.products?.name || 'Удален' }}</td>
-                <td class="px-1.5 py-3 text-right text-blue-600 border-r border-slate-100">{{ record.arrival }}</td>
-                <td class="px-1.5 py-3 text-right text-slate-800 border-r border-slate-100">{{ record.remainder }}</td>
-                <td class="px-1.5 py-3 text-right text-red-500">{{ record.write_off }}</td>
+                <td
+                  v-if="record.rowType === 'category'"
+                  colspan="4"
+                  class="bg-slate-50 px-2.5 py-2 text-[12px] uppercase tracking-[0.12em] text-slate-500"
+                >
+                  {{ record.categoryLabel }}
+                </td>
+                <template v-else>
+                  <td class="px-2.5 py-3 leading-tight text-slate-900 border-r border-slate-100">{{ record.products?.name || 'Удален' }}</td>
+                  <td class="px-1.5 py-3 text-right text-blue-600 border-r border-slate-100">{{ record.arrival }}</td>
+                  <td class="px-1.5 py-3 text-right text-slate-800 border-r border-slate-100">{{ record.remainder }}</td>
+                  <td class="px-1.5 py-3 text-right text-red-500">{{ record.write_off }}</td>
+                </template>
               </tr>
             </tbody>
           </table>

@@ -43,7 +43,7 @@ const submit = () => {
   <section class="min-h-screen bg-gradient-to-b from-blue-50 via-slate-50 to-white flex items-center justify-center p-4">
     <div class="w-full max-w-sm bg-white rounded-3xl p-5 shadow-xl border border-blue-100/70">
       <div class="mb-5 text-center">
-        <h1 class="text-2xl font-black italic tracking-tight text-slate-800 uppercase">Кофетерий</h1>
+        <h1 class="text-2xl font-black italic tracking-tight text-slate-800 uppercase">Кафетерий</h1>
         <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-1">
           Вход в систему
         </p>

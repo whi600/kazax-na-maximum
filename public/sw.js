@@ -67,7 +67,7 @@ self.addEventListener('push', (event) => {
     }
   })()
 
-  const title = payload.title || 'Кофетерий'
+  const title = payload.title || 'Кафетерий'
   const options = {
     body: payload.body || '',
     icon: payload.icon || '/icons/icon-192.png',
