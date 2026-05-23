@@ -37,6 +37,10 @@ export const deleteTodayRecordsStatement = db.prepare(
   'DELETE FROM daily_records WHERE record_date = ?',
 )
 
+export const deleteArchiveRecordsBeforeStatement = db.prepare(
+  'DELETE FROM daily_records WHERE record_date < ?',
+)
+
 export const insertDailyRecordStatement = db.prepare(`
   INSERT INTO daily_records(record_date, product_id, arrival, remainder, write_off, user_id, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
@@ -54,5 +58,6 @@ export const listArchiveRecordsStatement = db.prepare(`
     p.category AS product_category
   FROM daily_records dr
   JOIN products p ON p.id = dr.product_id
+  WHERE dr.record_date >= ?
   ORDER BY dr.record_date DESC, p.name ASC
 `)

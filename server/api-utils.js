@@ -11,6 +11,12 @@ export const toShiftDto = (row) => ({
 
 export const getToday = () => new Date().toISOString().slice(0, 10)
 
+export const getRetentionStartDate = (days) => {
+  const date = new Date()
+  date.setUTCDate(date.getUTCDate() - (Math.max(1, Number(days) || 1) - 1))
+  return date.toISOString().slice(0, 10)
+}
+
 export const getCurrentWeekStartDate = () => {
   const today = new Date()
   const day = today.getDay() || 7
