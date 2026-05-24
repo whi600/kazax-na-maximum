@@ -34,6 +34,7 @@ docker exec "$DB_CONTAINER" pg_dump \
   | gzip > "$tmp_file"
 
 mv "$tmp_file" "$backup_file"
+chmod 600 "$backup_file"
 find "$BACKUP_DIR" -type f -name '*.sql.gz' -mtime +"$RETENTION_DAYS" -delete
 
 echo "$backup_file"
