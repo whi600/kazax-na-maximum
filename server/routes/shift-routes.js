@@ -208,7 +208,7 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
         if (!Number.isFinite(shiftId)) continue
         const existingShift = await getShiftByIdStatement.getOn(client, shiftId)
         if (existingShift) deletedSnapshot.push(existingShift)
-        await deleteShiftStatement.runOn(client, shiftId)
+        await deleteShiftStatement.runOn(client, user.id, 'bulk_save', shiftId)
       }
 
       const createdIds = []
@@ -439,7 +439,7 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
       return true
     }
 
-    await deleteShiftStatement.run(shiftAction.id)
+    await deleteShiftStatement.run(authUser.id, 'single_delete', shiftAction.id)
     await touchResource('schedule', authUser)
     await logAudit({
       actorUser: authUser,

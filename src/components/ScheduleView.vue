@@ -303,7 +303,7 @@ const loadScheduleTemplate = async () => {
   }
 }
 
-const fetchShifts = async () => {
+const fetchShifts = async ({ preserveDrafts = false } = {}) => {
   suppressStructureAutosave = true
   try {
     const previousWeekStart = selectedWeekStart.value
@@ -356,8 +356,10 @@ const fetchShifts = async () => {
       selectedWeekStart.value = currentWeekStart
     }
 
+    if (!preserveDrafts) {
       pendingDeleteIds.value = []
-    unsavedNewShifts.value = []
+      unsavedNewShifts.value = []
+    }
   } catch (error) {
     safeAlert(error?.message || 'Ошибка загрузки смен')
   } finally {
@@ -733,22 +735,40 @@ const hasStructureChanges = computed(
   () => unsavedNewShifts.value.length > 0 || pendingDeleteIds.value.length > 0,
 )
 
+const getDraftShiftKey = (shift) =>
+  `${shift?.date || ''}|${shift?.start_time || ''}|${shift?.end_time || ''}`
+
 const saveStructure = async ({ silent = false } = {}) => {
   if (!hasStructureChanges.value || isSaving.value) return
   isSaving.value = true
   setStructureSaveStatus('saving')
 
+  const savedDeleteIds = [...pendingDeleteIds.value]
+  const savedTempIds = unsavedNewShifts.value.map((shift) => shift.id)
+  const savedTempKeys = new Map(
+    unsavedNewShifts.value.map((shift) => [shift.id, getDraftShiftKey(shift)]),
+  )
+  const savedNewShifts = unsavedNewShifts.value.map(({ date, start_time, end_time }) => ({
+    date,
+    start_time,
+    end_time,
+  }))
+
   try {
     const response = await shiftsApi.bulkSave({
-      deletedIds: [...pendingDeleteIds.value],
-      newShifts: unsavedNewShifts.value.map(({ date, start_time, end_time }) => ({
-        date,
-        start_time,
-        end_time,
-      })),
+      deletedIds: savedDeleteIds,
+      newShifts: savedNewShifts,
     })
 
-    await fetchShifts()
+    pendingDeleteIds.value = pendingDeleteIds.value.filter(
+      (id) => !savedDeleteIds.includes(id),
+    )
+    unsavedNewShifts.value = unsavedNewShifts.value.filter(
+      (shift) =>
+        !savedTempIds.includes(shift.id) ||
+        getDraftShiftKey(shift) !== savedTempKeys.get(shift.id),
+    )
+    await fetchShifts({ preserveDrafts: true })
     const createdIds = Array.isArray(response?.createdIds)
       ? response.createdIds.map(Number).filter(Number.isFinite)
       : []
@@ -764,6 +784,9 @@ const saveStructure = async ({ silent = false } = {}) => {
     if (!silent) safeAlert(error?.message || 'Не удалось сохранить изменения')
   } finally {
     isSaving.value = false
+    if (hasStructureChanges.value) {
+      saveStructure({ silent: true })
+    }
   }
 }
 

@@ -390,6 +390,19 @@ const migrations = [
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL;
     `,
   },
+  {
+    name: '013_soft_delete_shifts',
+    sql: `
+      ALTER TABLE shifts
+        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS delete_reason TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_shifts_active_date
+        ON shifts(date)
+        WHERE deleted_at IS NULL;
+    `,
+  },
 ]
 
 const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()

@@ -10,6 +10,7 @@ export const listUpcomingShiftsStatement = db.prepare(`
     status
   FROM shifts
   WHERE date >= ?
+    AND deleted_at IS NULL
   ORDER BY date ASC, start_time ASC
 `)
 
@@ -22,6 +23,7 @@ export const listAllShiftsStatement = db.prepare(`
     employee_name,
     status
   FROM shifts
+  WHERE deleted_at IS NULL
   ORDER BY date DESC, start_time DESC
 `)
 
@@ -31,11 +33,12 @@ export const listReminderShiftsStatement = db.prepare(`
   WHERE status = 'approved'
     AND employee_name IS NOT NULL
     AND date >= ?
+    AND deleted_at IS NULL
   ORDER BY date ASC, start_time ASC
 `)
 
 export const getShiftByIdStatement = db.prepare(
-  'SELECT id, date, start_time, end_time, employee_name, status, created_by FROM shifts WHERE id = ?',
+  'SELECT id, date, start_time, end_time, employee_name, status, created_by FROM shifts WHERE id = ? AND deleted_at IS NULL',
 )
 
 export const insertShiftStatement = db.prepare(`
@@ -56,4 +59,6 @@ export const updateShiftDetailsStatement = db.prepare(
   "UPDATE shifts SET date = ?, start_time = ?, end_time = ?, updated_at = datetime('now') WHERE id = ?",
 )
 
-export const deleteShiftStatement = db.prepare('DELETE FROM shifts WHERE id = ?')
+export const deleteShiftStatement = db.prepare(
+  "UPDATE shifts SET deleted_at = datetime('now'), deleted_by = ?, delete_reason = ?, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL",
+)
