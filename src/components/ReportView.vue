@@ -54,29 +54,25 @@ const toggleGroup = (key) => {
         @add="emit('add-product', $event)"
       />
 
-      <div v-for="category in categories" :key="category.key" class="space-y-1.5">
+      <div v-for="category in categories" :key="category.key" class="space-y-1">
         <button
           v-if="groupedEntries[category.key].length"
           type="button"
           @click="toggleGroup(category.key)"
-          class="w-full rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm flex items-center justify-between gap-3 active:scale-[0.99] transition-all"
+          class="w-full pt-2 pb-1 ml-1 pr-2 flex items-center justify-between gap-3 active:opacity-70 transition-opacity"
           :aria-expanded="!isGroupCollapsed(category.key)"
         >
-          <span class="flex min-w-0 items-center gap-2">
-            <span class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-              <component :is="category.icon" class="w-4 h-4" />
+          <span class="flex min-w-0 items-center gap-1.5">
+            <component :is="category.icon" class="w-3 h-3 text-blue-600" />
+            <span class="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em]">
+              {{ category.label }}
             </span>
-            <span class="min-w-0 text-left">
-              <span class="block text-[12px] font-black text-slate-800 uppercase tracking-[0.08em]">
-                {{ category.label }}
-              </span>
-              <span class="block text-[9px] font-black text-slate-400 uppercase">
-                {{ groupedEntries[category.key].length }} поз.
-              </span>
+            <span class="text-[8px] font-black text-slate-300 uppercase">
+              {{ groupedEntries[category.key].length }}
             </span>
           </span>
           <ChevronDown
-            class="w-4 h-4 text-slate-400 transition-transform duration-300"
+            class="w-3.5 h-3.5 text-slate-300 transition-transform duration-300"
             :class="isGroupCollapsed(category.key) ? '-rotate-90' : 'rotate-0'"
           />
         </button>
