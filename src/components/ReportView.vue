@@ -59,7 +59,7 @@ const toggleGroup = (key) => {
           v-if="groupedEntries[category.key].length"
           type="button"
           @click="toggleGroup(category.key)"
-          class="w-full pt-2 pb-1 ml-1 pr-2 flex items-center justify-between gap-3 active:opacity-70 transition-opacity"
+          class="w-full pt-2 pb-1 ml-1 pr-2 flex items-center justify-start gap-3 active:opacity-70 transition-opacity"
           :aria-expanded="!isGroupCollapsed(category.key)"
         >
           <span class="flex min-w-0 items-center gap-1.5">
