@@ -24,26 +24,36 @@ export const listTodayRecordsStatement = db.prepare(`
     dr.arrival,
     dr.remainder,
     dr.write_off,
-    p.name,
-    p.category,
-    p.unit
+    COALESCE(p.name, dr.product_name, 'Удален') AS name,
+    COALESCE(p.category, dr.product_category, 'other') AS category,
+    COALESCE(p.unit, dr.product_unit, 'шт') AS unit
   FROM daily_records dr
-  JOIN products p ON p.id = dr.product_id
+  LEFT JOIN products p ON p.id = dr.product_id
   WHERE dr.record_date = ?
-  ORDER BY p.name
+    AND dr.product_id IS NOT NULL
+  ORDER BY name
 `)
 
 export const deleteTodayRecordsStatement = db.prepare(
-  'DELETE FROM daily_records WHERE record_date = ?',
-)
-
-export const deleteArchiveRecordsBeforeStatement = db.prepare(
-  'DELETE FROM daily_records WHERE record_date < ?',
+  'DELETE FROM daily_records WHERE record_date = ? AND product_id IS NOT NULL',
 )
 
 export const insertDailyRecordStatement = db.prepare(`
-  INSERT INTO daily_records(record_date, product_id, arrival, remainder, write_off, user_id, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  INSERT INTO daily_records(
+    record_date,
+    product_id,
+    product_name,
+    product_category,
+    product_unit,
+    arrival,
+    remainder,
+    write_off,
+    user_id,
+    updated_at
+  )
+  SELECT ?, p.id, p.name, p.category, p.unit, ?, ?, ?, ?, datetime('now')
+  FROM products p
+  WHERE p.id = ?
 `)
 
 export const listArchiveRecordsStatement = db.prepare(`
@@ -54,10 +64,10 @@ export const listArchiveRecordsStatement = db.prepare(`
     dr.arrival,
     dr.remainder,
     dr.write_off,
-    p.name AS product_name,
-    p.category AS product_category
+    COALESCE(p.name, dr.product_name, 'Удален') AS product_name,
+    COALESCE(p.category, dr.product_category, 'other') AS product_category
   FROM daily_records dr
-  JOIN products p ON p.id = dr.product_id
+  LEFT JOIN products p ON p.id = dr.product_id
   WHERE dr.record_date >= ?
-  ORDER BY dr.record_date DESC, p.name ASC
+  ORDER BY dr.record_date DESC, product_name ASC
 `)

@@ -2,7 +2,6 @@ import { requirePermission, requireUser } from '../auth.js'
 import { logAudit, touchResource } from '../audit.js'
 import { badRequest, json, notFound, readJsonBody } from '../http.js'
 import {
-  deleteArchiveRecordsBeforeStatement,
   deleteProductStatement,
   deleteTodayRecordsStatement,
   getProductByIdStatement,
@@ -130,8 +129,6 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
     const user = await requireUser(req, res)
     if (!user) return true
 
-    await deleteArchiveRecordsBeforeStatement.run(getRetentionStartDate(REPORT_ARCHIVE_DAYS))
-
     const rows = await listTodayRecordsStatement.all(getToday())
     const entries = rows.map((row) => ({
       product_id: row.product_id,
@@ -157,10 +154,6 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
     const today = getToday()
 
     await db.transaction(async (client) => {
-      await deleteArchiveRecordsBeforeStatement.runOn(
-        client,
-        getRetentionStartDate(REPORT_ARCHIVE_DAYS),
-      )
       await deleteTodayRecordsStatement.runOn(client, today)
 
       for (const item of entries) {
@@ -185,11 +178,11 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
         await insertDailyRecordStatement.runOn(
           client,
           today,
-          productId,
           normalizedArrival,
           normalizedRemainder,
           normalizedWriteOff,
           user.id,
+          productId,
         )
       }
     })
@@ -203,8 +196,6 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
     if (!user) return true
 
     const retentionStartDate = getRetentionStartDate(REPORT_ARCHIVE_DAYS)
-    await deleteArchiveRecordsBeforeStatement.run(retentionStartDate)
-
     const rows = await listArchiveRecordsStatement.all(retentionStartDate)
     const records = rows.map((row) => ({
       id: row.id,

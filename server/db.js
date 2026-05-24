@@ -348,6 +348,48 @@ const migrations = [
       WHERE NOT EXISTS (SELECT 1 FROM schedule_template_shifts);
     `,
   },
+  {
+    name: '012_daily_record_product_snapshots',
+    sql: `
+      ALTER TABLE daily_records
+        ADD COLUMN IF NOT EXISTS product_name TEXT,
+        ADD COLUMN IF NOT EXISTS product_category TEXT,
+        ADD COLUMN IF NOT EXISTS product_unit TEXT;
+
+      UPDATE daily_records dr
+      SET
+        product_name = COALESCE(dr.product_name, p.name),
+        product_category = COALESCE(dr.product_category, p.category),
+        product_unit = COALESCE(dr.product_unit, p.unit)
+      FROM products p
+      WHERE dr.product_id = p.id;
+
+      ALTER TABLE daily_records
+        ALTER COLUMN product_id DROP NOT NULL,
+        ALTER COLUMN product_category SET DEFAULT 'other',
+        ALTER COLUMN product_unit SET DEFAULT 'шт';
+
+      DO $$
+      DECLARE
+        fk_name TEXT;
+      BEGIN
+        SELECT conname INTO fk_name
+        FROM pg_constraint
+        WHERE conrelid = 'daily_records'::regclass
+          AND confrelid = 'products'::regclass
+          AND contype = 'f'
+        LIMIT 1;
+
+        IF fk_name IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE daily_records DROP CONSTRAINT %I', fk_name);
+        END IF;
+      END $$;
+
+      ALTER TABLE daily_records
+        ADD CONSTRAINT daily_records_product_id_fkey
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL;
+    `,
+  },
 ]
 
 const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()
