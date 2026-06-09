@@ -32,6 +32,7 @@ import {
 } from '../api-utils.js'
 
 const WEEK_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const SELF_UNBOOK_LOCK_MS = 48 * 60 * 60 * 1000
 
 const getScheduleManagerIds = async (excludeUserId = null) =>
   listUserIds(listUsersWithScheduleManageStatement, excludeUserId)
@@ -43,6 +44,11 @@ const addDaysToDateKey = (dateKey, amount) => {
 }
 
 const isShiftEnded = (shift) => new Date(`${shift.date}T${shift.end_time}`) <= new Date()
+
+const isShiftSelfUnbookLocked = (shift) => {
+  const startTime = new Date(`${shift.date}T${shift.start_time}`).getTime()
+  return startTime - Date.now() < SELF_UNBOOK_LOCK_MS
+}
 
 const parseWeekDeletePath = (pathname) => {
   const match = pathname.match(/^\/api\/shifts\/week\/(\d{4}-\d{2}-\d{2})$/)
@@ -559,11 +565,19 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
 
   if (req.method === 'PATCH' && shiftAction.action === 'unbook') {
     const authPermissions = await getUserPermissions(authUser)
+    const isSelfUnbook =
+      normalizePersonName(shift.employee_name) === normalizePersonName(authUser.name)
+
     if (
       !authPermissions.scheduleManage &&
-      normalizePersonName(shift.employee_name) !== normalizePersonName(authUser.name)
+      !isSelfUnbook
     ) {
       forbidden(res)
+      return true
+    }
+
+    if (!authPermissions.scheduleManage && isShiftSelfUnbookLocked(shift)) {
+      badRequest(res, 'Нельзя сняться со смены меньше чем за 48 часов до начала')
       return true
     }
 

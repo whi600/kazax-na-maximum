@@ -85,6 +85,7 @@ let structureAutosaveTimer = null
 let suppressStructureAutosave = false
 let tempShiftSeq = 0
 const DEFAULT_WEEKS_BOOTSTRAP_KEY = 'kofeyny:default-weeks-bootstrap:v1'
+const SELF_CANCEL_LOCK_MS = 48 * 60 * 60 * 1000
 const weekHoldTriggered = ref(false)
 let weekHoldTimer = null
 let schedulePresenceTimer = null
@@ -280,6 +281,11 @@ const isShiftPast = (shift) => {
   return shiftEnd <= now
 }
 
+const isShiftSelfCancelLocked = (shift) => {
+  const shiftStart = new Date(`${shift.date}T${shift.start_time}`).getTime()
+  return shiftStart - Date.now() < SELF_CANCEL_LOCK_MS
+}
+
 const normalizePersonName = (value) =>
   String(value || '')
     .trim()
@@ -300,7 +306,10 @@ const isCurrentUserShift = (shift) => {
   return candidates.includes(shiftName)
 }
 
-const canSelfCancelBooking = (shift) => isCurrentUserShift(shift) && !isShiftPast(shift)
+const canSelfCancelBooking = (shift) =>
+  isCurrentUserShift(shift) &&
+  !isShiftPast(shift) &&
+  !isShiftSelfCancelLocked(shift)
 
 const makeTempShift = ({ date, start_time, end_time }) => ({
   id: -(Date.now() + tempShiftSeq++),
@@ -768,6 +777,15 @@ const cancelBooking = (shift) => {
 
   if (isCurrentUserShift(shift) && isShiftPast(shift)) {
     safeAlert('Нельзя снять запись с прошедшей смены')
+    return
+  }
+
+  if (
+    !canManageSchedule.value &&
+    isCurrentUserShift(shift) &&
+    isShiftSelfCancelLocked(shift)
+  ) {
+    safeAlert('Нельзя сняться со смены меньше чем за 48 часов до начала')
     return
   }
 
