@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Search, X } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -14,7 +14,6 @@ const props = defineProps({
 const emit = defineEmits(['close', 'update:selected-user-id', 'retry', 'submit'])
 
 const search = ref('')
-const searchInput = ref(null)
 
 const normalizedSearch = computed(() => search.value.trim().toLowerCase())
 
@@ -58,11 +57,6 @@ watch(
   { immediate: true },
 )
 
-onMounted(() => {
-  nextTick(() => {
-    searchInput.value?.focus()
-  })
-})
 </script>
 
 <template>
@@ -99,7 +93,6 @@ onMounted(() => {
           <label class="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
             <Search class="h-4 w-4 text-slate-400" />
             <input
-              ref="searchInput"
               v-model="search"
               type="search"
               class="w-full bg-transparent text-sm font-bold text-slate-900 outline-none placeholder:text-slate-300"
