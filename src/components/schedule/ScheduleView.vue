@@ -1,32 +1,31 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { editingApi, shiftsApi } from '../../api'
+import { shiftsApi } from '../../api'
 import {
-  addDays,
-  createDefaultWeekTemplate,
-  DEFAULT_WEEK_TEMPLATE_SHIFTS,
   formatDateHeader,
   formatDateInput,
-  formatWeekDay,
   formatWeekRange,
   getCurrentWeekStart,
   getNextWeekStart,
   getWeekDates,
   getWeekStart,
   isPastDate,
-  parseDate,
   pickMissingTemplateShifts,
-  toDateKey,
 } from '../../scheduleUtils'
 import {
-  Calendar,
   Bell,
 } from 'lucide-vue-next'
+import ScheduleDaysList from './ScheduleDaysList.vue'
 import SchedulePendingRequestsSheet from './SchedulePendingRequestsSheet.vue'
 import ScheduleAssignModal from './ScheduleAssignModal.vue'
-import ScheduleShiftCard from './ScheduleShiftCard.vue'
 import ScheduleShiftModal from './ScheduleShiftModal.vue'
+import ScheduleSaveStatus from './ScheduleSaveStatus.vue'
+import ScheduleWeekDeleteConfirm from './ScheduleWeekDeleteConfirm.vue'
 import ScheduleWeekControls from './ScheduleWeekControls.vue'
+import { useScheduleBooking } from './composables/useScheduleBooking'
+import { useScheduleData } from './composables/useScheduleData'
+import { useOverlayScrollLock } from './composables/useOverlayScrollLock'
+import { useSchedulePresence } from './composables/useSchedulePresence'
 
 const props = defineProps({
   userRole: { type: String, default: '' },
@@ -42,53 +41,21 @@ const props = defineProps({
 
 const emit = defineEmits(['pending-count'])
 
-const shifts = ref([])
-const loading = ref(true)
-const scheduleTemplateShifts = ref([])
 const isModalOpen = ref(false)
 const isExtraShift = ref(false)
 const editingShiftId = ref(null)
-const currentUserName = ref('Сотрудник')
 const showPendingSheet = ref(false)
-const selectedWeekStart = ref('')
 const pendingWeekDeleteStart = ref('')
 const isDeletingWeek = ref(false)
 const blockWeekAddUntil = ref(0)
-const isAssignModalOpen = ref(false)
-const assignShift = ref(null)
-const assignableUsers = ref([])
-const assignUsersLoading = ref(false)
-const assignUsersError = ref('')
-const assignBusy = ref(false)
-const selectedAssignUserId = ref(null)
 
-const pendingDeleteIds = ref([])
-const unsavedNewShifts = ref([])
-const recentNewShiftIds = ref([])
-const dismissedNewShiftIds = ref([])
 const isSaving = ref(false)
 const structureSaveStatus = ref('idle')
-const scheduleCollabStatus = ref({
-  activeEditors: [],
-  lastChangedAt: null,
-  lastChangedBy: null,
-})
-const overlayScrollState = {
-  htmlOverflow: '',
-  bodyOverflow: '',
-  bodyTouchAction: '',
-  htmlOverscrollBehavior: '',
-  bodyOverscrollBehavior: '',
-}
 let structureStatusHideTimer = null
 let structureAutosaveTimer = null
 let suppressStructureAutosave = false
-let tempShiftSeq = 0
-const DEFAULT_WEEKS_BOOTSTRAP_KEY = 'kofeyny:default-weeks-bootstrap:v1'
-const SELF_CANCEL_LOCK_MS = 48 * 60 * 60 * 1000
 const weekHoldTriggered = ref(false)
 let weekHoldTimer = null
-let schedulePresenceTimer = null
 
 const form = ref({ date: '', start_time: '09:00', end_time: '18:00' })
 
@@ -97,6 +64,39 @@ const safeConfirm = (message, callback) => callback(window.confirm(message))
 const canManageSchedule = computed(
   () => Boolean(props.permissions?.scheduleManage || props.userRole === 'admin'),
 )
+const { lockPageScroll, unlockPageScroll } = useOverlayScrollLock()
+const {
+  scheduleEditorsLabel,
+  ensureSchedulePresence,
+  stopSchedulePresence,
+} = useSchedulePresence({ canManageSchedule })
+const setSuppressStructureAutosave = (value) => {
+  suppressStructureAutosave = value
+}
+const {
+  shifts,
+  loading,
+  scheduleTemplateShifts,
+  selectedWeekStart,
+  pendingDeleteIds,
+  unsavedNewShifts,
+  recentNewShiftIds,
+  approvedShifts,
+  weekStarts,
+  selectedWeekDays,
+  selectedWeekStats,
+  pendingRequests,
+  makeTempShift,
+  isNewShift,
+  markShiftInteracted,
+  markDefaultWeeksBootstrapped,
+  fetchShifts: fetchScheduleShifts,
+  initializeScheduleData,
+} = useScheduleData({
+  canManageSchedule,
+  isCurrentUserShift: (shift) => isCurrentUserShift(shift),
+  safeAlert,
+})
 
 const isAnyOverlayOpen = computed(
   () =>
@@ -142,12 +142,6 @@ const modalSubmitLabel = computed(() => {
   return 'Добавить в черновик'
 })
 
-const assignShiftLabel = computed(() => {
-  const shift = assignShift.value
-  if (!shift) return ''
-  return `${formatDateHeader(shift.date)} · ${shift.start_time}-${shift.end_time}`
-})
-
 const structureSaveClass = computed(() => {
   if (structureSaveStatus.value === 'saving') return 'bg-blue-50 text-blue-600 border-blue-100'
   if (structureSaveStatus.value === 'error') return 'bg-red-50 text-red-500 border-red-100'
@@ -163,376 +157,46 @@ const pendingWeekDeleteRange = computed(() =>
   pendingWeekDeleteStart.value ? formatWeekRange(pendingWeekDeleteStart.value) : '',
 )
 
-const scheduleEditorsLabel = computed(() => {
-  const names = scheduleCollabStatus.value.activeEditors.map((item) => item.user_name)
-  if (names.length === 0) return ''
-  if (names.length === 1) return `Сейчас редактирует: ${names[0]}`
-  return `Сейчас редактируют: ${names.join(', ')}`
+const {
+  currentUserName,
+  isAssignModalOpen,
+  assignShiftLabel,
+  assignableUsers,
+  assignUsersLoading,
+  assignUsersError,
+  assignBusy,
+  selectedAssignUserId,
+  resolveUserName,
+  isCurrentUserShift,
+  canSelfCancelBooking,
+  reloadAssignableUsers,
+  closeAssignModal,
+  assignSelectedUser,
+  handleBookClick,
+  cancelBooking,
+} = useScheduleBooking({
+  props,
+  canManageSchedule,
+  shifts,
+  saveStructure: (...args) => saveStructure(...args),
+  fetchShifts: (...args) => fetchShifts(...args),
+  markShiftInteracted,
+  setStructureSaveStatus,
+  safeAlert,
+  safeConfirm,
 })
 
-const stopSchedulePresence = async () => {
-  if (schedulePresenceTimer) {
-    clearInterval(schedulePresenceTimer)
-    schedulePresenceTimer = null
-  }
-
-  if (canManageSchedule.value) {
-    try {
-      await editingApi.heartbeat({ resource: 'schedule', active: false })
-    } catch {
-      // noop
-    }
-  }
-}
-
-const lockPageScroll = () => {
-  if (typeof document === 'undefined') return
-  const { documentElement, body } = document
-
-  if (!overlayScrollState.htmlOverflow) overlayScrollState.htmlOverflow = documentElement.style.overflow
-  if (!overlayScrollState.bodyOverflow) overlayScrollState.bodyOverflow = body.style.overflow
-  if (!overlayScrollState.bodyTouchAction) overlayScrollState.bodyTouchAction = body.style.touchAction
-  if (!overlayScrollState.htmlOverscrollBehavior) {
-    overlayScrollState.htmlOverscrollBehavior = documentElement.style.overscrollBehavior
-  }
-  if (!overlayScrollState.bodyOverscrollBehavior) {
-    overlayScrollState.bodyOverscrollBehavior = body.style.overscrollBehavior
-  }
-
-  documentElement.style.overflow = 'hidden'
-  documentElement.style.overscrollBehavior = 'none'
-  body.style.overflow = 'hidden'
-  body.style.overscrollBehavior = 'none'
-  body.style.touchAction = 'none'
-}
-
-const unlockPageScroll = () => {
-  if (typeof document === 'undefined') return
-  const { documentElement, body } = document
-
-  documentElement.style.overflow = overlayScrollState.htmlOverflow
-  documentElement.style.overscrollBehavior = overlayScrollState.htmlOverscrollBehavior
-  body.style.overflow = overlayScrollState.bodyOverflow
-  body.style.overscrollBehavior = overlayScrollState.bodyOverscrollBehavior
-  body.style.touchAction = overlayScrollState.bodyTouchAction
-}
-
-const syncSchedulePresence = async () => {
-  if (!canManageSchedule.value) return
-
-  try {
-    await editingApi.heartbeat({ resource: 'schedule', active: true })
-    const status = await editingApi.status('schedule')
-    scheduleCollabStatus.value = {
-      activeEditors: status.activeEditors || [],
-      lastChangedAt: status.lastChangedAt || null,
-      lastChangedBy: status.lastChangedBy || null,
-    }
-  } catch {
-    // noop
-  }
-}
-
-const ensureSchedulePresence = async () => {
-  if (!canManageSchedule.value) {
-    await stopSchedulePresence()
-    return
-  }
-
-  await syncSchedulePresence()
-  if (schedulePresenceTimer) clearInterval(schedulePresenceTimer)
-  schedulePresenceTimer = setInterval(() => {
-    syncSchedulePresence()
-  }, 8000)
-}
-
-const hasBootstrappedDefaultWeeks = () => {
-  if (typeof window === 'undefined') return true
-  return window.localStorage.getItem(DEFAULT_WEEKS_BOOTSTRAP_KEY) === '1'
-}
-
-const markDefaultWeeksBootstrapped = () => {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(DEFAULT_WEEKS_BOOTSTRAP_KEY, '1')
-}
-
-const resolveUserName = () => {
-  if (props.displayName?.trim()) {
-    currentUserName.value = props.displayName.trim()
-    return
-  }
-
-  if (props.currentUser?.name) {
-    currentUserName.value = props.currentUser.name
-    return
-  }
-
-  if (props.currentUser?.email?.includes('@')) {
-    currentUserName.value = props.currentUser.email.split('@')[0]
-    return
-  }
-
-  currentUserName.value = 'Сотрудник'
-}
-
-const isShiftPast = (shift) => {
-  const now = new Date()
-  const shiftEnd = new Date(`${shift.date}T${shift.end_time}`)
-  return shiftEnd <= now
-}
-
-const isShiftSelfCancelLocked = (shift) => {
-  const shiftStart = new Date(`${shift.date}T${shift.start_time}`).getTime()
-  return shiftStart - Date.now() < SELF_CANCEL_LOCK_MS
-}
-
-const normalizePersonName = (value) =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-
-const isCurrentUserShift = (shift) => {
-  const shiftName = normalizePersonName(shift.employee_name)
-  if (!shiftName) return false
-
-  const candidates = [
-    currentUserName.value,
-    props.currentUser?.name,
-    props.currentUser?.email?.split('@')[0],
-  ]
-    .map(normalizePersonName)
-    .filter(Boolean)
-
-  return candidates.includes(shiftName)
-}
-
-const canSelfCancelBooking = (shift) =>
-  isCurrentUserShift(shift) &&
-  !isShiftPast(shift) &&
-  !isShiftSelfCancelLocked(shift)
-
-const makeTempShift = ({ date, start_time, end_time }) => ({
-  id: -(Date.now() + tempShiftSeq++),
-  date,
-  start_time,
-  end_time,
-  status: 'approved',
-  employee_name: null,
-})
-
-const isNewShift = (shift) => {
-  const id = Number(shift?.id)
-  if (!Number.isFinite(id) || dismissedNewShiftIds.value.includes(id)) return false
-  return id < 0 || recentNewShiftIds.value.includes(id)
-}
-
-const markShiftInteracted = (shift) => {
-  const id = Number(shift?.id)
-  if (!Number.isFinite(id) || dismissedNewShiftIds.value.includes(id)) return
-  dismissedNewShiftIds.value = [...dismissedNewShiftIds.value, id]
-}
-
-const loadScheduleTemplate = async () => {
-  try {
-    const response = await shiftsApi.template()
-    scheduleTemplateShifts.value = response.shifts || []
-  } catch {
-    scheduleTemplateShifts.value = DEFAULT_WEEK_TEMPLATE_SHIFTS
-  }
-}
-
-const loadAssignableUsers = async () => {
-  if (!canManageSchedule.value) return
-  if (assignableUsers.value.length > 0 || assignUsersLoading.value) return
-
-  assignUsersError.value = ''
-  assignUsersLoading.value = true
-  try {
-    const response = await shiftsApi.assignableUsers()
-    assignableUsers.value = response.users || []
-  } catch (error) {
-    assignUsersError.value = error?.message || 'Не удалось загрузить сотрудников'
-  } finally {
-    assignUsersLoading.value = false
-  }
-}
-
-const reloadAssignableUsers = async () => {
-  assignableUsers.value = []
-  await loadAssignableUsers()
-  if (!selectedAssignUserId.value) {
-    selectedAssignUserId.value = resolveDefaultAssignUserId()
-  }
-}
-
-const resolveDefaultAssignUserId = () => {
-  const currentId = Number(props.currentUser?.id)
-  if (Number.isFinite(currentId)) return currentId
-
-  const currentEmail = String(props.currentUser?.email || '').toLowerCase()
-  const byEmail = assignableUsers.value.find(
-    (user) => String(user.email || '').toLowerCase() === currentEmail,
-  )
-  if (byEmail) return byEmail.id
-
-  return assignableUsers.value[0]?.id || null
-}
-
-const fetchShifts = async ({ preserveDrafts = false, skipDefaultBootstrap = false } = {}) => {
-  suppressStructureAutosave = true
-  try {
-    const previousWeekStart = selectedWeekStart.value
-    const response = await shiftsApi.upcoming()
-    shifts.value = response.shifts || []
-
-    const approvedServerShifts = shifts.value.filter(
-      (shift) => (shift.status || 'approved') === 'approved',
-    )
-
-    if (
-      canManageSchedule.value &&
-      approvedServerShifts.length === 0 &&
-      !skipDefaultBootstrap &&
-      !hasBootstrappedDefaultWeeks()
-    ) {
-      const currentWeek = getCurrentWeekStart()
-      const nextWeek = getNextWeekStart(currentWeek)
-      const defaults = [
-        ...createDefaultWeekTemplate(currentWeek, scheduleTemplateShifts.value),
-        ...createDefaultWeekTemplate(nextWeek, scheduleTemplateShifts.value),
-      ]
-
-      await shiftsApi.bulkSave({
-        deletedIds: [],
-        newShifts: defaults,
-      })
-
-      markDefaultWeeksBootstrapped()
-      const refreshed = await shiftsApi.upcoming()
-      shifts.value = refreshed.shifts || []
-    } else if (approvedServerShifts.length > 0) {
-      markDefaultWeeksBootstrapped()
-    }
-
-    const currentWeekStart = getCurrentWeekStart()
-    const availableWeeks = Array.from(
-      new Set(
-        shifts.value
-          .filter((shift) => (shift.status || 'approved') === 'approved')
-          .map((shift) => getWeekStart(shift.date))
-          .filter((weekStart) => weekStart >= currentWeekStart),
-      ),
-    ).sort()
-
-    const firstApprovedShift = shifts.value
-      .filter((shift) => (shift.status || 'approved') === 'approved')
-      .sort((a, b) => `${a.date}T${a.start_time}`.localeCompare(`${b.date}T${b.start_time}`))[0]
-
-    if (previousWeekStart && availableWeeks.includes(previousWeekStart)) {
-      selectedWeekStart.value = previousWeekStart
-    } else if (firstApprovedShift) {
-      selectedWeekStart.value = getWeekStart(firstApprovedShift.date)
-    } else {
-      selectedWeekStart.value = currentWeekStart
-    }
-
-    if (!preserveDrafts) {
-      pendingDeleteIds.value = []
-      unsavedNewShifts.value = []
-    }
-  } catch (error) {
-    safeAlert(error?.message || 'Ошибка загрузки смен')
-  } finally {
-    suppressStructureAutosave = false
-  }
-}
-
-const initialize = async () => {
-  loading.value = true
-  resolveUserName()
-  await loadScheduleTemplate()
-  await fetchShifts()
-  loading.value = false
-}
-
-const approvedShifts = computed(() => {
-  const all = [
-    ...shifts.value.filter(
-      (shift) =>
-        (shift.status || 'approved') === 'approved' &&
-        !pendingDeleteIds.value.includes(shift.id),
-    ),
-    ...unsavedNewShifts.value,
-  ]
-
-  return all.sort((a, b) => {
-    const aTime = new Date(`${a.date}T${a.start_time}`)
-    const bTime = new Date(`${b.date}T${b.start_time}`)
-    return aTime - bTime
-  })
-})
-
-const groupedShifts = computed(() => {
-  const groups = {}
-
-  approvedShifts.value.forEach((shift) => {
-    if (!groups[shift.date]) groups[shift.date] = []
-    groups[shift.date].push(shift)
+const fetchShifts = (options = {}) =>
+  fetchScheduleShifts({
+    ...options,
+    setSuppressAutosave: setSuppressStructureAutosave,
   })
 
-  return groups
-})
-
-const weekStarts = computed(() => {
-  const currentWeekStart = getCurrentWeekStart()
-  const starts = new Set([currentWeekStart])
-
-  approvedShifts.value.forEach((shift) => {
-    const weekStart = getWeekStart(shift.date)
-    if (weekStart >= currentWeekStart) starts.add(weekStart)
+const initialize = () =>
+  initializeScheduleData({
+    resolveUserName,
+    setSuppressAutosave: setSuppressStructureAutosave,
   })
-
-  return Array.from(starts).sort()
-})
-
-const selectedWeekDays = computed(() => {
-  const weekStart = selectedWeekStart.value || weekStarts.value[0] || getCurrentWeekStart()
-  const start = parseDate(weekStart)
-
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = toDateKey(addDays(start, index))
-    const dayShifts = groupedShifts.value[date] || []
-    const occupiedCount = dayShifts.filter((shift) => shift.employee_name).length
-
-    return {
-      date,
-      isPast: isPastDate(date),
-      shifts: dayShifts,
-      occupiedCount,
-      openCount: dayShifts.length - occupiedCount,
-    }
-  })
-})
-
-const selectedWeekStats = computed(() => {
-  const shiftsCount = selectedWeekDays.value.reduce(
-    (sum, day) => sum + day.shifts.length,
-    0,
-  )
-  const openCount = selectedWeekDays.value.reduce((sum, day) => sum + day.openCount, 0)
-  const myCount = selectedWeekDays.value.reduce(
-    (sum, day) =>
-      sum +
-      day.shifts.filter((shift) => isCurrentUserShift(shift)).length,
-    0,
-  )
-
-  return { shiftsCount, openCount, myCount }
-})
-
-const pendingRequests = computed(() =>
-  shifts.value.filter((shift) => (shift.status || 'approved') === 'pending'),
-)
 
 const selectWeek = (weekStart) => {
   selectedWeekStart.value = weekStart
@@ -679,126 +343,6 @@ const addNextWeekTemplate = () => {
 
   unsavedNewShifts.value.push(...missing.map(makeTempShift))
   selectedWeekStart.value = nextWeek
-}
-
-const bookShift = (shift) => {
-  if (shift.employee_name) return
-  markShiftInteracted(shift)
-
-  safeConfirm(`Записаться на смену ${shift.start_time}-${shift.end_time}?`, async (ok) => {
-    if (!ok) return
-
-    try {
-      await shiftsApi.book(shift.id)
-      shift.employee_name = currentUserName.value
-    } catch (error) {
-      safeAlert(error?.message || 'Ошибка записи')
-    }
-  })
-}
-
-const findPersistedShift = (draftShift) =>
-  shifts.value.find(
-    (shift) =>
-      shift.date === draftShift.date &&
-      shift.start_time === draftShift.start_time &&
-      shift.end_time === draftShift.end_time &&
-      !shift.employee_name &&
-      (shift.status || 'approved') === 'approved',
-  )
-
-const resolveShiftForServerAction = async (shift) => {
-  if (Number(shift?.id) > 0) return shift
-
-  await saveStructure({ silent: true })
-  await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
-  return findPersistedShift(shift)
-}
-
-const openAssignModal = async (shift) => {
-  if (!canManageSchedule.value || shift.employee_name) return
-  markShiftInteracted(shift)
-
-  const persistedShift = await resolveShiftForServerAction(shift)
-  if (!persistedShift) {
-    safeAlert('Смена еще сохраняется. Попробуйте через секунду')
-    return
-  }
-
-  assignShift.value = persistedShift
-  selectedAssignUserId.value = resolveDefaultAssignUserId()
-  assignUsersError.value = ''
-  isAssignModalOpen.value = true
-  await loadAssignableUsers()
-  if (!selectedAssignUserId.value) {
-    selectedAssignUserId.value = resolveDefaultAssignUserId()
-  }
-}
-
-const closeAssignModal = () => {
-  if (assignBusy.value) return
-  isAssignModalOpen.value = false
-  assignShift.value = null
-}
-
-const assignSelectedUser = async () => {
-  const shift = assignShift.value
-  if (!shift || !selectedAssignUserId.value || assignBusy.value) return
-
-  assignBusy.value = true
-  try {
-    const response = await shiftsApi.assign(shift.id, selectedAssignUserId.value)
-    const employeeName = response.employee_name
-    shifts.value = shifts.value.map((item) =>
-      item.id === shift.id ? { ...item, employee_name: employeeName } : item,
-    )
-    setStructureSaveStatus('saved')
-    isAssignModalOpen.value = false
-    assignShift.value = null
-  } catch (error) {
-    safeAlert(error?.message || 'Не удалось назначить сотрудника')
-    await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
-  } finally {
-    assignBusy.value = false
-  }
-}
-
-const handleBookClick = (shift) => {
-  if (canManageSchedule.value) {
-    openAssignModal(shift)
-    return
-  }
-
-  bookShift(shift)
-}
-
-const cancelBooking = (shift) => {
-  markShiftInteracted(shift)
-
-  if (isCurrentUserShift(shift) && isShiftPast(shift)) {
-    safeAlert('Нельзя снять запись с прошедшей смены')
-    return
-  }
-
-  if (
-    !canManageSchedule.value &&
-    isCurrentUserShift(shift) &&
-    isShiftSelfCancelLocked(shift)
-  ) {
-    safeAlert('Нельзя сняться со смены меньше чем за 48 часов до начала')
-    return
-  }
-
-  safeConfirm(`Убрать запись сотрудника ${shift.employee_name}?`, async (ok) => {
-    if (!ok) return
-
-    try {
-      await shiftsApi.unbook(shift.id)
-      shift.employee_name = null
-    } catch (error) {
-      safeAlert(error?.message || 'Не удалось убрать запись')
-    }
-  })
 }
 
 const openModal = (date = null, isHelp = false) => {
@@ -1116,71 +660,25 @@ onBeforeUnmount(() => {
           @add-week="addNextWeekTemplate"
         />
 
-        <TransitionGroup name="day-card" appear tag="div" class="space-y-8">
-          <div v-for="(day, dayIndex) in selectedWeekDays" :key="day.date" class="day-card">
-            <div class="flex items-center justify-between mb-3 ml-1">
-              <div>
-                <h3
-                  class="text-[11px] font-black uppercase tracking-widest"
-                  :class="day.isPast ? 'text-slate-300' : 'text-blue-600'"
-                >
-                  {{ formatDateHeader(day.date) }}
-                </h3>
-              </div>
-            </div>
-
-            <div
-              v-if="day.shifts.length === 0"
-              class="border border-dashed rounded-lg p-4 text-center"
-              :class="day.isPast ? 'bg-slate-100/70 border-slate-200' : 'bg-white/70 border-slate-100'"
-            >
-              <p
-                class="text-[10px] font-black uppercase"
-                :class="day.isPast ? 'text-slate-300' : 'text-slate-300'"
-              >
-                {{ formatWeekDay(day.date) }} свободен
-              </p>
-            </div>
-
-            <TransitionGroup name="shift-card" appear tag="div" class="space-y-2">
-              <ScheduleShiftCard
-                v-for="(shift, shiftIndex) in day.shifts"
-                :key="shift.id"
-                :shift="shift"
-                :is-past="day.isPast"
-                :is-new="isNewShift(shift)"
-                :can-manage-schedule="canManageSchedule"
-                :can-self-cancel="canSelfCancelBooking(shift)"
-                :day-delay="`${dayIndex * 80}ms`"
-                :shift-delay="`${shiftIndex * 70}ms`"
-                @book="handleBookClick(shift)"
-                @cancel="cancelBooking(shift)"
-                @edit="openEditModal(shift)"
-                @delete="markForDeletion(shift)"
-              />
-            </TransitionGroup>
-          </div>
-        </TransitionGroup>
-
-        <div v-if="approvedShifts.length === 0" class="text-center py-20 opacity-20 schedule-fade">
-          <Calendar class="w-12 h-12 mx-auto mb-2" />
-          <p class="text-xs font-black uppercase">График не заполнен</p>
-        </div>
+        <ScheduleDaysList
+          :days="selectedWeekDays"
+          :approved-count="approvedShifts.length"
+          :can-manage-schedule="canManageSchedule"
+          :can-self-cancel="canSelfCancelBooking"
+          :is-new-shift="isNewShift"
+          @book="handleBookClick"
+          @cancel="cancelBooking"
+          @edit="openEditModal"
+          @delete="markForDeletion"
+        />
       </div>
     </Transition>
 
-    <div
+    <ScheduleSaveStatus
       v-if="canManageSchedule && structureSaveLabel"
-      class="fixed left-1/2 -translate-x-1/2 z-[120] pointer-events-none"
-      :style="{ bottom: 'calc(86px + var(--app-safe-bottom, env(safe-area-inset-bottom)))' }"
-    >
-      <div
-        class="rounded-full border px-4 py-2 text-[11px] font-black uppercase shadow-sm backdrop-blur-sm"
-        :class="structureSaveClass"
-      >
-        {{ structureSaveLabel }}
-      </div>
-    </div>
+      :label="structureSaveLabel"
+      :status-class="structureSaveClass"
+    />
 
     <ScheduleShiftModal
       v-if="isModalOpen"
@@ -1212,45 +710,13 @@ onBeforeUnmount(() => {
       @submit="assignSelectedUser"
     />
 
-    <Teleport to="body">
-      <Transition name="sheet-fade">
-        <div
-          v-if="pendingWeekDeleteStart"
-          class="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 px-4"
-          @click.self="closeWeekDeleteConfirm"
-        >
-          <div class="w-full max-w-[340px] rounded-2xl bg-white p-5 shadow-2xl">
-            <p class="text-[10px] font-black uppercase tracking-widest text-red-500">
-              Удаление недели
-            </p>
-            <h3 class="mt-2 text-xl font-black text-slate-900">
-              {{ pendingWeekDeleteRange }}
-            </h3>
-            <p class="mt-2 text-sm font-bold leading-snug text-slate-500">
-              Неделя удалится полностью. Если на сменах есть сотрудники, сервер не даст удалить её.
-            </p>
-            <div class="mt-5 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-slate-100 bg-white px-4 py-3 text-sm font-black text-slate-500"
-                :disabled="isDeletingWeek"
-                @click="closeWeekDeleteConfirm"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                class="rounded-lg bg-red-500 px-4 py-3 text-sm font-black text-white disabled:opacity-60"
-                :disabled="isDeletingWeek"
-                @click="deleteWeek(pendingWeekDeleteStart)"
-              >
-                {{ isDeletingWeek ? 'Удаляем...' : 'Удалить' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <ScheduleWeekDeleteConfirm
+      :visible="Boolean(pendingWeekDeleteStart)"
+      :week-range="pendingWeekDeleteRange"
+      :busy="isDeletingWeek"
+      @close="closeWeekDeleteConfirm"
+      @confirm="deleteWeek(pendingWeekDeleteStart)"
+    />
 
     <SchedulePendingRequestsSheet
       v-if="showPendingSheet && canManageSchedule"
