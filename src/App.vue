@@ -1,12 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { authApi, editingApi, notificationsApi, recordsApi } from './api'
-import { buildNavItems, getTabFromLocation, tabRoutes } from './navigation'
 import { defaultPermissionsByRole, permissionRows, roleLabels } from './permissions'
-import {
-  getNotificationPermission,
-  requestPushPermissionAndSubscribe,
-} from './pushNotifications'
+import { applyStandalonePwaClass, usePushBootstrap } from './app/usePushBootstrap'
+import { useAppNavigation } from './app/useAppNavigation'
 import AdminArchive from './components/archive/AdminArchive.vue'
 import ScheduleView from './components/schedule/ScheduleView.vue'
 import AuthView from './components/shared/AuthView.vue'
@@ -19,18 +16,9 @@ import {
 } from 'lucide-vue-next'
 
 const SUPER_ADMIN_EMAIL = 'misakurnikov942@gmail.com'
-const PUSH_PROMPT_KEY_PREFIX = 'kofeteriy:push-prompt'
 
-if (typeof window !== 'undefined') {
-  const standalone =
-    window.matchMedia?.('(display-mode: standalone)').matches ||
-    window.matchMedia?.('(display-mode: fullscreen)').matches ||
-    window.navigator?.standalone === true
+applyStandalonePwaClass()
 
-  document.documentElement.classList.toggle('is-standalone-pwa', Boolean(standalone))
-}
-
-const activeTab = ref(getTabFromLocation())
 const scheduleViewRef = ref(null)
 const schedulePendingCount = ref(0)
 const products = ref([])
@@ -80,88 +68,20 @@ const canManageRoles = computed(() => Boolean(userPermissions.value.rolesManage)
 const isChef = computed(() => userRole.value === 'chef')
 const canAccessSchedule = computed(() => userRole.value !== 'chef')
 const canAccessArchive = computed(() => isChef.value || canViewAudit.value)
-
-const pageTitle = computed(() => {
-  if (activeTab.value === 'schedule') return 'График'
-  if (activeTab.value === 'archive') return 'Архив'
-  if (activeTab.value === 'profile' && profileView.value === 'assortment') {
-    return 'Ассортимент'
-  }
-  if (activeTab.value === 'profile' && profileView.value === 'roles') {
-    return 'Роли и доступ'
-  }
-  if (activeTab.value === 'profile' && profileView.value === 'notifications') {
-    return 'Уведомления'
-  }
-  if (activeTab.value === 'profile' && profileView.value === 'schedule-template') {
-    return 'Базовое расписание'
-  }
-  if (activeTab.value === 'profile') return 'Профиль'
-  return 'Отчет'
+const {
+  activeTab,
+  pageTitle,
+  navItems,
+  navigateTo,
+  handlePopState,
+  syncRoute,
+} = useAppNavigation({
+  profileView,
+  isChef,
+  canAccessArchive,
+  canAccessSchedule,
 })
-
-const navItems = computed(() =>
-  isChef.value
-    ? [{ tab: 'archive', label: 'Архив', icon: 'archive' }]
-    : buildNavItems({
-        canAccessSchedule: canAccessSchedule.value,
-        canAccessArchive: canAccessArchive.value,
-      }),
-)
-
-const updateRoute = (tab, replace = false) => {
-  if (typeof window === 'undefined') return
-
-  const route = tabRoutes[tab] || tabRoutes.main
-  if (window.location.pathname === route) return
-
-  const method = replace ? 'replaceState' : 'pushState'
-  window.history[method]({}, '', route)
-}
-
-const navigateTo = (tab, replace = false) => {
-  if (isChef.value) {
-    activeTab.value = 'archive'
-    profileView.value = 'main'
-    updateRoute('archive', replace)
-    return
-  }
-
-  const nextTab =
-    (tab === 'archive' && !canAccessArchive.value) ||
-    (tab === 'schedule' && !canAccessSchedule.value)
-      ? 'main'
-      : tab
-  activeTab.value = nextTab
-  if (nextTab !== 'profile') profileView.value = 'main'
-  updateRoute(nextTab, replace)
-}
-
-const buildPushPromptKey = (userId) => `${PUSH_PROMPT_KEY_PREFIX}:${userId}`
-
-const maybeAskForPushPermission = async (user) => {
-  if (typeof window === 'undefined' || !user?.id) return
-
-  const permission = getNotificationPermission()
-  if (permission === 'unsupported' || permission === 'denied' || permission === 'granted') {
-    return
-  }
-
-  const promptKey = buildPushPromptKey(user.id)
-  if (window.localStorage.getItem(promptKey) === '1') return
-
-  window.localStorage.setItem(promptKey, '1')
-
-  try {
-    await requestPushPermissionAndSubscribe(notificationsApi)
-  } catch {
-    // noop
-  }
-}
-
-const handlePopState = () => {
-  navigateTo(getTabFromLocation(), true)
-}
+const { maybeAskForPushPermission } = usePushBootstrap({ notificationsApi })
 
 const fetchAppData = async () => {
   appLoading.value = true
@@ -715,7 +635,7 @@ watch(
 )
 
 onMounted(async () => {
-  updateRoute(activeTab.value, true)
+  syncRoute()
   window.addEventListener('popstate', handlePopState)
   await initialize()
 })
