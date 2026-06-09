@@ -7,6 +7,7 @@ defineProps({
   selectedWeekStart: { type: String, default: '' },
   selectedWeekStats: { type: Object, required: true },
   canManageSchedule: { type: Boolean, default: false },
+  addDisabled: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['select-week', 'hold-week', 'cancel-hold', 'add-week'])
@@ -49,7 +50,9 @@ const handleWeekClick = (event, weekStart) => {
       <button
         v-if="canManageSchedule"
         @click="emit('add-week')"
+        :disabled="addDisabled"
         class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all bg-white text-slate-400 border-slate-100 flex items-center justify-center min-w-[108px]"
+        :class="addDisabled ? 'opacity-40 pointer-events-none' : ''"
         type="button"
         aria-label="Добавить неделю"
       >

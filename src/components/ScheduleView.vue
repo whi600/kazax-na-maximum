@@ -50,6 +50,9 @@ const editingShiftId = ref(null)
 const currentUserName = ref('Сотрудник')
 const showPendingSheet = ref(false)
 const selectedWeekStart = ref('')
+const pendingWeekDeleteStart = ref('')
+const isDeletingWeek = ref(false)
+const blockWeekAddUntil = ref(0)
 
 const pendingDeleteIds = ref([])
 const unsavedNewShifts = ref([])
@@ -87,7 +90,7 @@ const canManageSchedule = computed(
 )
 
 const isAnyOverlayOpen = computed(
-  () => isModalOpen.value || showPendingSheet.value,
+  () => isModalOpen.value || showPendingSheet.value || Boolean(pendingWeekDeleteStart.value),
 )
 
 const setStructureSaveStatus = (status) => {
@@ -132,6 +135,14 @@ const structureSaveClass = computed(() => {
   if (structureSaveStatus.value === 'saved') return 'bg-emerald-50 text-emerald-600 border-emerald-100'
   return 'bg-slate-50 text-slate-400 border-slate-100'
 })
+
+const isWeekAddBlocked = computed(
+  () => isDeletingWeek.value || Date.now() < blockWeekAddUntil.value,
+)
+
+const pendingWeekDeleteRange = computed(() =>
+  pendingWeekDeleteStart.value ? formatWeekRange(pendingWeekDeleteStart.value) : '',
+)
 
 const scheduleEditorsLabel = computed(() => {
   const names = scheduleCollabStatus.value.activeEditors.map((item) => item.user_name)
@@ -499,11 +510,11 @@ const startWeekHold = (weekStart) => {
   weekHoldTimer = setTimeout(() => {
     weekHoldTimer = null
     finishWeekHold()
-    deleteWeek(weekStart)
+    openWeekDeleteConfirm(weekStart)
   }, 650)
 }
 
-const deleteWeek = (weekStart) => {
+const openWeekDeleteConfirm = (weekStart) => {
   if (!canManageSchedule.value) return
 
   const weekDateSet = new Set(getWeekDates(weekStart))
@@ -518,60 +529,76 @@ const deleteWeek = (weekStart) => {
     return
   }
 
-  safeConfirm(`Удалить всю неделю ${formatWeekRange(weekStart)}?`, async (ok) => {
-    if (!ok) return
+  pendingWeekDeleteStart.value = weekStart
+}
 
-    markDefaultWeeksBootstrapped()
-    if (structureAutosaveTimer) {
-      clearTimeout(structureAutosaveTimer)
-      structureAutosaveTimer = null
+const closeWeekDeleteConfirm = () => {
+  if (isDeletingWeek.value) return
+  pendingWeekDeleteStart.value = ''
+}
+
+const deleteWeek = async (weekStart) => {
+  if (!canManageSchedule.value || !weekStart || isDeletingWeek.value) return
+
+  markDefaultWeeksBootstrapped()
+  isDeletingWeek.value = true
+  blockWeekAddUntil.value = Date.now() + 1500
+  if (structureAutosaveTimer) {
+    clearTimeout(structureAutosaveTimer)
+    structureAutosaveTimer = null
+  }
+
+  const weekDateSet = new Set(getWeekDates(weekStart))
+  const previousSelectedWeekStart = selectedWeekStart.value
+  const previousShifts = [...shifts.value]
+  const previousUnsavedNewShifts = [...unsavedNewShifts.value]
+
+  suppressStructureAutosave = true
+
+  try {
+    await waitForStructureSave()
+    const currentWeekServerShifts = shifts.value.filter((shift) =>
+      weekDateSet.has(shift.date),
+    )
+
+    unsavedNewShifts.value = unsavedNewShifts.value.filter(
+      (shift) => !weekDateSet.has(shift.date),
+    )
+    shifts.value = shifts.value.filter((shift) => !weekDateSet.has(shift.date))
+
+    if (selectedWeekStart.value === weekStart) {
+      const remainingWeeks = weekStarts.value.filter((item) => item !== weekStart)
+      selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
     }
 
-    const previousSelectedWeekStart = selectedWeekStart.value
-    const previousShifts = [...shifts.value]
-    const previousUnsavedNewShifts = [...unsavedNewShifts.value]
-
-    suppressStructureAutosave = true
-
-    try {
-      await waitForStructureSave()
-      const currentWeekServerShifts = shifts.value.filter((shift) =>
-        weekDateSet.has(shift.date),
-      )
-
-      unsavedNewShifts.value = unsavedNewShifts.value.filter(
-        (shift) => !weekDateSet.has(shift.date),
-      )
-      shifts.value = shifts.value.filter((shift) => !weekDateSet.has(shift.date))
-
-      if (selectedWeekStart.value === weekStart) {
-        const remainingWeeks = weekStarts.value.filter((item) => item !== weekStart)
-        selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
-      }
-
-      if (currentWeekServerShifts.length > 0) {
-        await shiftsApi.deleteWeek(weekStart)
-      }
-
-      await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
-      setStructureSaveStatus('saved')
-    } catch (error) {
-      shifts.value = previousShifts
-      unsavedNewShifts.value = previousUnsavedNewShifts
-      selectedWeekStart.value = previousSelectedWeekStart
-      safeAlert(error?.message || 'Не удалось удалить неделю. Попробуйте еще раз')
-    } finally {
-      const shouldResumeAutosave = hasStructureChanges.value
-      suppressStructureAutosave = false
-      if (shouldResumeAutosave) {
-        saveStructure({ silent: true })
-      }
+    if (currentWeekServerShifts.length > 0) {
+      await shiftsApi.deleteWeek(weekStart)
     }
-  })
+
+    await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
+    setStructureSaveStatus('saved')
+    pendingWeekDeleteStart.value = ''
+  } catch (error) {
+    shifts.value = previousShifts
+    unsavedNewShifts.value = previousUnsavedNewShifts
+    selectedWeekStart.value = previousSelectedWeekStart
+    safeAlert(error?.message || 'Не удалось удалить неделю. Попробуйте еще раз')
+  } finally {
+    const shouldResumeAutosave = hasStructureChanges.value
+    suppressStructureAutosave = false
+    isDeletingWeek.value = false
+    window.setTimeout(() => {
+      blockWeekAddUntil.value = 0
+    }, 1500)
+    if (shouldResumeAutosave) {
+      saveStructure({ silent: true })
+    }
+  }
 }
 
 const addNextWeekTemplate = () => {
   if (!canManageSchedule.value) return
+  if (isWeekAddBlocked.value) return
 
   const lastWeek = weekStarts.value[weekStarts.value.length - 1] || getCurrentWeekStart()
   const nextWeek = getNextWeekStart(lastWeek)
@@ -934,6 +961,7 @@ onBeforeUnmount(() => {
           :selected-week-start="selectedWeekStart"
           :selected-week-stats="selectedWeekStats"
           :can-manage-schedule="canManageSchedule"
+          :add-disabled="isWeekAddBlocked"
           @select-week="onWeekTabClick"
           @hold-week="startWeekHold"
           @cancel-hold="cancelWeekHold"
@@ -1021,6 +1049,46 @@ onBeforeUnmount(() => {
       @update:start-time="form.start_time = $event"
       @update:end-time="form.end_time = $event"
     />
+
+    <Teleport to="body">
+      <Transition name="sheet-fade">
+        <div
+          v-if="pendingWeekDeleteStart"
+          class="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 px-4"
+          @click.self="closeWeekDeleteConfirm"
+        >
+          <div class="w-full max-w-[340px] rounded-2xl bg-white p-5 shadow-2xl">
+            <p class="text-[10px] font-black uppercase tracking-widest text-red-500">
+              Удаление недели
+            </p>
+            <h3 class="mt-2 text-xl font-black text-slate-900">
+              {{ pendingWeekDeleteRange }}
+            </h3>
+            <p class="mt-2 text-sm font-bold leading-snug text-slate-500">
+              Неделя удалится полностью. Если на сменах есть сотрудники, сервер не даст удалить её.
+            </p>
+            <div class="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-slate-100 bg-white px-4 py-3 text-sm font-black text-slate-500"
+                :disabled="isDeletingWeek"
+                @click="closeWeekDeleteConfirm"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                class="rounded-lg bg-red-500 px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+                :disabled="isDeletingWeek"
+                @click="deleteWeek(pendingWeekDeleteStart)"
+              >
+                {{ isDeletingWeek ? 'Удаляем...' : 'Удалить' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <SchedulePendingRequestsSheet
       v-if="showPendingSheet && canManageSchedule"
