@@ -74,10 +74,12 @@ const filterSubscriptionsBySettings = async (userIds, kind) => {
 }
 
 const deliverPushRows = async (rows, payload) => {
+  let deliveredCount = 0
   for (const row of rows) {
     const result = await sendPushNotification(row, payload)
     if (result.ok) {
       await markPushSubscriptionSuccessStatement.run(row.endpoint)
+      deliveredCount += 1
       continue
     }
 
@@ -88,11 +90,12 @@ const deliverPushRows = async (rows, payload) => {
 
     await markPushSubscriptionErrorStatement.run(row.endpoint)
   }
+  return deliveredCount
 }
 
 export const notifyUsers = async (userIds, kind, payload) => {
   const rows = await filterSubscriptionsBySettings(userIds, kind)
-  await deliverPushRows(rows, payload)
+  return deliverPushRows(rows, payload)
 }
 
 export const notifyUserByName = async (name, kind, payload) => {

@@ -1,4 +1,4 @@
-import { toBoolInt, requireUser } from '../auth.js'
+import { toBoolInt, requirePermission, requireUser } from '../auth.js'
 import { badRequest, json, readJsonBody } from '../http.js'
 import {
   buildPushPayload,
@@ -8,6 +8,7 @@ import {
 } from '../notifications.js'
 import {
   deletePushSubscriptionStatement,
+  listNotificationTargetUsersStatement,
   upsertNotificationSettingsStatement,
   upsertPushSubscriptionStatement,
 } from '../statements.js'
@@ -113,6 +114,38 @@ export const handleNotificationRoutes = async ({ req, res, pathname }) => {
     )
 
     json(res, 200, { ok: true })
+    return true
+  }
+
+  if (pathname === '/api/notifications/broadcast' && req.method === 'POST') {
+    const access = await requirePermission(req, res, 'scheduleManage')
+    if (!access) return true
+
+    const body = await readJsonBody(req)
+    const title = String(body.title || '').trim().slice(0, 80)
+    const message = String(body.message || '').trim().slice(0, 240)
+
+    if (!title || !message) {
+      badRequest(res, 'Заполните заголовок и текст уведомления')
+      return true
+    }
+
+    const userIds = (await listNotificationTargetUsersStatement.all()).map((row) =>
+      Number(row.id),
+    )
+    const sentCount = await notifyUsers(
+      userIds,
+      'shifts',
+      buildPushPayload({
+        title,
+        body: message,
+        url: '/profile',
+        tag: `broadcast-${Date.now()}`,
+        urgency: 'high',
+      }),
+    )
+
+    json(res, 200, { ok: true, sentCount })
     return true
   }
 

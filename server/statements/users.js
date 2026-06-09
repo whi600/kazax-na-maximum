@@ -36,6 +36,12 @@ export const listScheduleAssignableUsersStatement = db.prepare(`
   ORDER BY LOWER(name) ASC, id ASC
 `)
 
+export const listNotificationTargetUsersStatement = db.prepare(`
+  SELECT id
+  FROM users
+  ORDER BY id ASC
+`)
+
 export const listEmployeeUsersStatement = db.prepare(`
   SELECT id, email, name, role, created_at
   FROM users

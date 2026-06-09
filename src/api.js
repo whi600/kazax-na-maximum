@@ -151,4 +151,9 @@ export const notificationsApi = {
       body: JSON.stringify({ endpoint }),
     }),
   test: () => apiRequest('/api/notifications/test', { method: 'POST' }),
+  broadcast: (payload) =>
+    apiRequest('/api/notifications/broadcast', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 }
