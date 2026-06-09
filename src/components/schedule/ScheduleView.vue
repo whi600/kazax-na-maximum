@@ -4,10 +4,8 @@ import { shiftsApi } from '../../api'
 import {
   formatDateHeader,
   formatDateInput,
-  formatWeekRange,
   getCurrentWeekStart,
   getNextWeekStart,
-  getWeekDates,
   getWeekStart,
   isPastDate,
   pickMissingTemplateShifts,
@@ -27,6 +25,7 @@ import { useScheduleData } from './composables/useScheduleData'
 import { useOverlayScrollLock } from './composables/useOverlayScrollLock'
 import { useSchedulePresence } from './composables/useSchedulePresence'
 import { useScheduleShiftModal } from './composables/useScheduleShiftModal'
+import { useScheduleWeekDeletion } from './composables/useScheduleWeekDeletion'
 
 const props = defineProps({
   userRole: { type: String, default: '' },
@@ -43,17 +42,12 @@ const props = defineProps({
 const emit = defineEmits(['pending-count'])
 
 const showPendingSheet = ref(false)
-const pendingWeekDeleteStart = ref('')
-const isDeletingWeek = ref(false)
-const blockWeekAddUntil = ref(0)
 
 const isSaving = ref(false)
 const structureSaveStatus = ref('idle')
 let structureStatusHideTimer = null
 let structureAutosaveTimer = null
 let suppressStructureAutosave = false
-const weekHoldTriggered = ref(false)
-let weekHoldTimer = null
 
 const safeAlert = (message) => alert(message)
 const safeConfirm = (message, callback) => callback(window.confirm(message))
@@ -68,6 +62,12 @@ const {
 } = useSchedulePresence({ canManageSchedule })
 const setSuppressStructureAutosave = (value) => {
   suppressStructureAutosave = value
+}
+
+const clearStructureAutosave = () => {
+  if (!structureAutosaveTimer) return
+  clearTimeout(structureAutosaveTimer)
+  structureAutosaveTimer = null
 }
 const {
   shifts,
@@ -146,14 +146,6 @@ const structureSaveClass = computed(() => {
   return 'bg-slate-50 text-slate-400 border-slate-100'
 })
 
-const isWeekAddBlocked = computed(
-  () => isDeletingWeek.value || Date.now() < blockWeekAddUntil.value,
-)
-
-const pendingWeekDeleteRange = computed(() =>
-  pendingWeekDeleteStart.value ? formatWeekRange(pendingWeekDeleteStart.value) : '',
-)
-
 const {
   currentUserName,
   isAssignModalOpen,
@@ -194,132 +186,6 @@ const initialize = () =>
     resolveUserName,
     setSuppressAutosave: setSuppressStructureAutosave,
   })
-
-const selectWeek = (weekStart) => {
-  selectedWeekStart.value = weekStart
-}
-
-const onWeekTabClick = (weekStart) => {
-  if (weekHoldTriggered.value) {
-    weekHoldTriggered.value = false
-    return
-  }
-
-  selectWeek(weekStart)
-}
-
-const cancelWeekHold = () => {
-  if (!weekHoldTimer) return
-  clearTimeout(weekHoldTimer)
-  weekHoldTimer = null
-}
-
-const finishWeekHold = () => {
-  cancelWeekHold()
-  weekHoldTriggered.value = true
-}
-
-const waitForStructureSave = async () => {
-  while (isSaving.value) {
-    await new Promise((resolve) => {
-      setTimeout(resolve, 80)
-    })
-  }
-}
-
-const startWeekHold = (weekStart) => {
-  if (!canManageSchedule.value) return
-
-  cancelWeekHold()
-  weekHoldTriggered.value = false
-  weekHoldTimer = setTimeout(() => {
-    weekHoldTimer = null
-    finishWeekHold()
-    openWeekDeleteConfirm(weekStart)
-  }, 650)
-}
-
-const openWeekDeleteConfirm = (weekStart) => {
-  if (!canManageSchedule.value) return
-
-  const weekDateSet = new Set(getWeekDates(weekStart))
-  const weekServerShifts = shifts.value.filter((shift) => weekDateSet.has(shift.date))
-  const weekUnsavedShifts = unsavedNewShifts.value.filter((shift) => weekDateSet.has(shift.date))
-  const hasBookedShift = [...weekServerShifts, ...weekUnsavedShifts].some(
-    (shift) => weekDateSet.has(shift.date) && Boolean(shift.employee_name),
-  )
-
-  if (hasBookedShift) {
-    safeAlert('Нельзя удалить неделю: есть смены с записью сотрудников')
-    return
-  }
-
-  pendingWeekDeleteStart.value = weekStart
-}
-
-const closeWeekDeleteConfirm = () => {
-  if (isDeletingWeek.value) return
-  pendingWeekDeleteStart.value = ''
-}
-
-const deleteWeek = async (weekStart) => {
-  if (!canManageSchedule.value || !weekStart || isDeletingWeek.value) return
-
-  markDefaultWeeksBootstrapped()
-  isDeletingWeek.value = true
-  blockWeekAddUntil.value = Date.now() + 1500
-  if (structureAutosaveTimer) {
-    clearTimeout(structureAutosaveTimer)
-    structureAutosaveTimer = null
-  }
-
-  const weekDateSet = new Set(getWeekDates(weekStart))
-  const previousSelectedWeekStart = selectedWeekStart.value
-  const previousShifts = [...shifts.value]
-  const previousUnsavedNewShifts = [...unsavedNewShifts.value]
-
-  suppressStructureAutosave = true
-
-  try {
-    await waitForStructureSave()
-    const currentWeekServerShifts = shifts.value.filter((shift) =>
-      weekDateSet.has(shift.date),
-    )
-
-    unsavedNewShifts.value = unsavedNewShifts.value.filter(
-      (shift) => !weekDateSet.has(shift.date),
-    )
-    shifts.value = shifts.value.filter((shift) => !weekDateSet.has(shift.date))
-
-    if (selectedWeekStart.value === weekStart) {
-      const remainingWeeks = weekStarts.value.filter((item) => item !== weekStart)
-      selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
-    }
-
-    if (currentWeekServerShifts.length > 0) {
-      await shiftsApi.deleteWeek(weekStart)
-    }
-
-    await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
-    setStructureSaveStatus('saved')
-    pendingWeekDeleteStart.value = ''
-  } catch (error) {
-    shifts.value = previousShifts
-    unsavedNewShifts.value = previousUnsavedNewShifts
-    selectedWeekStart.value = previousSelectedWeekStart
-    safeAlert(error?.message || 'Не удалось удалить неделю. Попробуйте еще раз')
-  } finally {
-    const shouldResumeAutosave = hasStructureChanges.value
-    suppressStructureAutosave = false
-    isDeletingWeek.value = false
-    window.setTimeout(() => {
-      blockWeekAddUntil.value = 0
-    }, 1500)
-    if (shouldResumeAutosave) {
-      saveStructure({ silent: true })
-    }
-  }
-}
 
 const addNextWeekTemplate = () => {
   if (!canManageSchedule.value) return
@@ -527,6 +393,34 @@ const saveStructure = async ({ silent = false } = {}) => {
   }
 }
 
+const {
+  pendingWeekDeleteStart,
+  isDeletingWeek,
+  isWeekAddBlocked,
+  pendingWeekDeleteRange,
+  onWeekTabClick,
+  startWeekHold,
+  cancelWeekHold,
+  closeWeekDeleteConfirm,
+  deleteWeek,
+  cleanupWeekDeletion,
+} = useScheduleWeekDeletion({
+  canManageSchedule,
+  shifts,
+  unsavedNewShifts,
+  weekStarts,
+  selectedWeekStart,
+  isSaving,
+  hasStructureChanges,
+  fetchShifts,
+  saveStructure,
+  markDefaultWeeksBootstrapped,
+  setStructureSaveStatus,
+  setSuppressStructureAutosave,
+  clearStructureAutosave,
+  safeAlert,
+})
+
 watch(
   () => props.displayName,
   () => {
@@ -590,9 +484,9 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  if (structureAutosaveTimer) clearTimeout(structureAutosaveTimer)
+  clearStructureAutosave()
   if (structureStatusHideTimer) clearTimeout(structureStatusHideTimer)
-  cancelWeekHold()
+  cleanupWeekDeletion()
   stopSchedulePresence()
   unlockPageScroll()
 })
