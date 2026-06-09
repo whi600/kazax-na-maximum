@@ -95,6 +95,10 @@ export const shiftsApi = {
       method: 'POST',
       body: JSON.stringify({ deletedIds, newShifts }),
     }),
+  deleteWeek: (weekStart) =>
+    apiRequest(`/api/shifts/week/${encodeURIComponent(weekStart)}`, {
+      method: 'DELETE',
+    }),
   update: (id, payload) =>
     apiRequest(`/api/shifts/${id}`, {
       method: 'PATCH',

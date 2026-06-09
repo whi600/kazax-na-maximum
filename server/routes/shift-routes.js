@@ -29,8 +29,21 @@ import {
   toShiftDto,
 } from '../api-utils.js'
 
+const WEEK_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
 const getScheduleManagerIds = async (excludeUserId = null) =>
   listUserIds(listUsersWithScheduleManageStatement, excludeUserId)
+
+const addDaysToDateKey = (dateKey, amount) => {
+  const date = new Date(`${dateKey}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + amount)
+  return date.toISOString().slice(0, 10)
+}
+
+const parseWeekDeletePath = (pathname) => {
+  const match = pathname.match(/^\/api\/shifts\/week\/(\d{4}-\d{2}-\d{2})$/)
+  return match ? match[1] : null
+}
 
 const notifyShiftDeleted = async ({ shift, actorUser, tagId, title = 'Смена удалена' }) => {
   if (
@@ -69,6 +82,78 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
 
     const rows = await listAllShiftsStatement.all()
     json(res, 200, { shifts: rows.map(toShiftDto) })
+    return true
+  }
+
+  const weekStartToDelete = parseWeekDeletePath(pathname)
+  if (weekStartToDelete && req.method === 'DELETE') {
+    const access = await requirePermission(req, res, 'scheduleManage')
+    if (!access) return true
+    const { user } = access
+
+    if (!WEEK_DATE_PATTERN.test(weekStartToDelete)) {
+      badRequest(res, 'Некорректная неделя')
+      return true
+    }
+
+    const weekEnd = addDaysToDateKey(weekStartToDelete, 6)
+    const deletedSnapshot = await db.transaction(async (client) => {
+      const shifts = (
+        await client.query(
+          `
+            SELECT id, date, start_time, end_time, employee_name, status, created_by
+            FROM shifts
+            WHERE date >= $1
+              AND date <= $2
+              AND deleted_at IS NULL
+            ORDER BY date ASC, start_time ASC
+          `,
+          [weekStartToDelete, weekEnd],
+        )
+      ).rows
+
+      if (shifts.some((shift) => Boolean(shift.employee_name))) {
+        const error = new Error('Нельзя удалить неделю: есть смены с записью сотрудников')
+        error.statusCode = 400
+        throw error
+      }
+
+      for (const shift of shifts) {
+        await deleteShiftStatement.runOn(client, user.id, 'week_delete', shift.id)
+      }
+
+      return shifts
+    }).catch((error) => {
+      if (error.statusCode === 400) return error
+      throw error
+    })
+
+    if (deletedSnapshot instanceof Error) {
+      badRequest(res, deletedSnapshot.message)
+      return true
+    }
+
+    await touchResource('schedule', user)
+    if (deletedSnapshot.length > 0) {
+      await logAudit({
+        actorUser: user,
+        entityType: 'shift',
+        action: 'shift.week_delete',
+        before: { deleted: deletedSnapshot },
+        context: {
+          weekStart: weekStartToDelete,
+          weekEnd,
+          deletedCount: deletedSnapshot.length,
+        },
+      })
+    }
+    await Promise.all(
+      deletedSnapshot.map((shift) =>
+        notifyShiftDeleted({ shift, actorUser: user, tagId: shift.id }),
+      ),
+    )
+
+    json(res, 200, { ok: true, deletedCount: deletedSnapshot.length })
     return true
   }
 

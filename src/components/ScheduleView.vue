@@ -483,6 +483,14 @@ const finishWeekHold = () => {
   weekHoldTriggered.value = true
 }
 
+const waitForStructureSave = async () => {
+  while (isSaving.value) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 80)
+    })
+  }
+}
+
 const startWeekHold = (weekStart) => {
   if (!canManageSchedule.value) return
 
@@ -514,34 +522,50 @@ const deleteWeek = (weekStart) => {
     if (!ok) return
 
     markDefaultWeeksBootstrapped()
-    const previousSelectedWeekStart = selectedWeekStart.value
-    const previousPendingDeleteIds = [...pendingDeleteIds.value]
-    const previousUnsavedNewShifts = [...unsavedNewShifts.value]
-
-    unsavedNewShifts.value = unsavedNewShifts.value.filter(
-      (shift) => !weekDateSet.has(shift.date),
-    )
-
-    weekServerShifts.forEach((shift) => {
-      if (shift.id > 0) {
-        if (!pendingDeleteIds.value.includes(shift.id)) {
-          pendingDeleteIds.value = [...pendingDeleteIds.value, shift.id]
-        }
-      }
-    })
-
-    if (selectedWeekStart.value === weekStart) {
-      const remainingWeeks = weekStarts.value.filter((item) => item !== weekStart)
-      selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
+    if (structureAutosaveTimer) {
+      clearTimeout(structureAutosaveTimer)
+      structureAutosaveTimer = null
     }
 
-    const saved = await saveStructure({ silent: true })
-    if (!saved) {
-      pendingDeleteIds.value = previousPendingDeleteIds
+    const previousSelectedWeekStart = selectedWeekStart.value
+    const previousShifts = [...shifts.value]
+    const previousUnsavedNewShifts = [...unsavedNewShifts.value]
+
+    suppressStructureAutosave = true
+
+    try {
+      await waitForStructureSave()
+      const currentWeekServerShifts = shifts.value.filter((shift) =>
+        weekDateSet.has(shift.date),
+      )
+
+      unsavedNewShifts.value = unsavedNewShifts.value.filter(
+        (shift) => !weekDateSet.has(shift.date),
+      )
+      shifts.value = shifts.value.filter((shift) => !weekDateSet.has(shift.date))
+
+      if (selectedWeekStart.value === weekStart) {
+        const remainingWeeks = weekStarts.value.filter((item) => item !== weekStart)
+        selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
+      }
+
+      if (currentWeekServerShifts.length > 0) {
+        await shiftsApi.deleteWeek(weekStart)
+      }
+
+      await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
+      setStructureSaveStatus('saved')
+    } catch (error) {
+      shifts.value = previousShifts
       unsavedNewShifts.value = previousUnsavedNewShifts
       selectedWeekStart.value = previousSelectedWeekStart
-      await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
-      safeAlert('Не удалось удалить неделю. Попробуйте еще раз')
+      safeAlert(error?.message || 'Не удалось удалить неделю. Попробуйте еще раз')
+    } finally {
+      const shouldResumeAutosave = hasStructureChanges.value
+      suppressStructureAutosave = false
+      if (shouldResumeAutosave) {
+        saveStructure({ silent: true })
+      }
     }
   })
 }
@@ -812,7 +836,7 @@ const saveStructure = async ({ silent = false } = {}) => {
     return false
   } finally {
     isSaving.value = false
-    if (hasStructureChanges.value) {
+    if (hasStructureChanges.value && !suppressStructureAutosave) {
       saveStructure({ silent: true })
     }
   }
