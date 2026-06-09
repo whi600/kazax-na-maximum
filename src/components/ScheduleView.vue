@@ -303,7 +303,7 @@ const loadScheduleTemplate = async () => {
   }
 }
 
-const fetchShifts = async ({ preserveDrafts = false } = {}) => {
+const fetchShifts = async ({ preserveDrafts = false, skipDefaultBootstrap = false } = {}) => {
   suppressStructureAutosave = true
   try {
     const previousWeekStart = selectedWeekStart.value
@@ -314,7 +314,12 @@ const fetchShifts = async ({ preserveDrafts = false } = {}) => {
       (shift) => (shift.status || 'approved') === 'approved',
     )
 
-    if (canManageSchedule.value && approvedServerShifts.length === 0 && !hasBootstrappedDefaultWeeks()) {
+    if (
+      canManageSchedule.value &&
+      approvedServerShifts.length === 0 &&
+      !skipDefaultBootstrap &&
+      !hasBootstrappedDefaultWeeks()
+    ) {
       const currentWeek = getCurrentWeekStart()
       const nextWeek = getNextWeekStart(currentWeek)
       const defaults = [
@@ -508,6 +513,7 @@ const deleteWeek = (weekStart) => {
   safeConfirm(`Удалить всю неделю ${formatWeekRange(weekStart)}?`, async (ok) => {
     if (!ok) return
 
+    markDefaultWeeksBootstrapped()
     const previousSelectedWeekStart = selectedWeekStart.value
     const previousPendingDeleteIds = [...pendingDeleteIds.value]
     const previousUnsavedNewShifts = [...unsavedNewShifts.value]
@@ -534,7 +540,7 @@ const deleteWeek = (weekStart) => {
       pendingDeleteIds.value = previousPendingDeleteIds
       unsavedNewShifts.value = previousUnsavedNewShifts
       selectedWeekStart.value = previousSelectedWeekStart
-      await fetchShifts({ preserveDrafts: true })
+      await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
       safeAlert('Не удалось удалить неделю. Попробуйте еще раз')
     }
   })
@@ -785,7 +791,10 @@ const saveStructure = async ({ silent = false } = {}) => {
         !savedTempIds.includes(shift.id) ||
         getDraftShiftKey(shift) !== savedTempKeys.get(shift.id),
     )
-    await fetchShifts({ preserveDrafts: true })
+    await fetchShifts({
+      preserveDrafts: true,
+      skipDefaultBootstrap: savedDeleteIds.length > 0,
+    })
     const createdIds = Array.isArray(response?.createdIds)
       ? response.createdIds.map(Number).filter(Number.isFinite)
       : []
