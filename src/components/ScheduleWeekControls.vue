@@ -10,6 +10,16 @@ defineProps({
 })
 
 const emit = defineEmits(['select-week', 'hold-week', 'cancel-hold', 'add-week'])
+
+const handleWeekPointerDown = (event, weekStart) => {
+  event.preventDefault()
+  emit('hold-week', weekStart)
+}
+
+const handleWeekClick = (event, weekStart) => {
+  event.preventDefault()
+  emit('select-week', weekStart)
+}
 </script>
 
 <template>
@@ -18,14 +28,14 @@ const emit = defineEmits(['select-week', 'hold-week', 'cancel-hold', 'add-week']
       <button
         v-for="weekStart in weekStarts"
         :key="weekStart"
-        @click="emit('select-week', weekStart)"
-        @pointerdown.prevent="emit('hold-week', weekStart)"
+        @click="handleWeekClick($event, weekStart)"
+        @pointerdown="handleWeekPointerDown($event, weekStart)"
         @pointerup="emit('cancel-hold')"
         @pointerleave="emit('cancel-hold')"
         @pointercancel="emit('cancel-hold')"
         @contextmenu.prevent
         class="shrink-0 select-none rounded-lg px-3 py-2 border text-left transition-all"
-        style="-webkit-user-select: none; user-select: none; -webkit-touch-callout: none;"
+        style="-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation;"
         :class="
           weekStart === selectedWeekStart
             ? 'bg-slate-900 text-white border-slate-900'

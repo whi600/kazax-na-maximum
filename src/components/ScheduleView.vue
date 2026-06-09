@@ -473,6 +473,11 @@ const cancelWeekHold = () => {
   weekHoldTimer = null
 }
 
+const finishWeekHold = () => {
+  cancelWeekHold()
+  weekHoldTriggered.value = true
+}
+
 const startWeekHold = (weekStart) => {
   if (!canManageSchedule.value) return
 
@@ -480,7 +485,7 @@ const startWeekHold = (weekStart) => {
   weekHoldTriggered.value = false
   weekHoldTimer = setTimeout(() => {
     weekHoldTimer = null
-    weekHoldTriggered.value = true
+    finishWeekHold()
     deleteWeek(weekStart)
   }, 650)
 }
@@ -503,6 +508,10 @@ const deleteWeek = (weekStart) => {
   safeConfirm(`Удалить всю неделю ${formatWeekRange(weekStart)}?`, async (ok) => {
     if (!ok) return
 
+    const previousSelectedWeekStart = selectedWeekStart.value
+    const previousPendingDeleteIds = [...pendingDeleteIds.value]
+    const previousUnsavedNewShifts = [...unsavedNewShifts.value]
+
     unsavedNewShifts.value = unsavedNewShifts.value.filter(
       (shift) => !weekDateSet.has(shift.date),
     )
@@ -520,7 +529,14 @@ const deleteWeek = (weekStart) => {
       selectedWeekStart.value = remainingWeeks[0] || getCurrentWeekStart()
     }
 
-    await saveStructure({ silent: true })
+    const saved = await saveStructure({ silent: true })
+    if (!saved) {
+      pendingDeleteIds.value = previousPendingDeleteIds
+      unsavedNewShifts.value = previousUnsavedNewShifts
+      selectedWeekStart.value = previousSelectedWeekStart
+      await fetchShifts({ preserveDrafts: true })
+      safeAlert('Не удалось удалить неделю. Попробуйте еще раз')
+    }
   })
 }
 
@@ -739,7 +755,8 @@ const getDraftShiftKey = (shift) =>
   `${shift?.date || ''}|${shift?.start_time || ''}|${shift?.end_time || ''}`
 
 const saveStructure = async ({ silent = false } = {}) => {
-  if (!hasStructureChanges.value || isSaving.value) return
+  if (!hasStructureChanges.value) return true
+  if (isSaving.value) return false
   isSaving.value = true
   setStructureSaveStatus('saving')
 
@@ -779,9 +796,11 @@ const saveStructure = async ({ silent = false } = {}) => {
       recentNewShiftIds.value = Array.from(new Set([...existing, ...createdIds]))
     }
     setStructureSaveStatus('saved')
+    return true
   } catch (error) {
     setStructureSaveStatus('error')
     if (!silent) safeAlert(error?.message || 'Не удалось сохранить изменения')
+    return false
   } finally {
     isSaving.value = false
     if (hasStructureChanges.value) {
