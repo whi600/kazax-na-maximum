@@ -235,6 +235,7 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
     pendingDeleteIds,
     unsavedNewShifts,
     recentNewShiftIds,
+    dismissedNewShiftIds,
     approvedShifts,
     weekStarts,
     selectedWeekDays,

@@ -81,6 +81,7 @@ const {
   pendingDeleteIds,
   unsavedNewShifts,
   recentNewShiftIds,
+  dismissedNewShiftIds,
   approvedShifts,
   weekStarts,
   selectedWeekDays,

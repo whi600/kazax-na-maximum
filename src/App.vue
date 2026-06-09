@@ -5,6 +5,8 @@ import { defaultPermissionsByRole, permissionRows, roleLabels } from './permissi
 import { applyStandalonePwaClass, usePushBootstrap } from './app/usePushBootstrap'
 import { useAppNavigation } from './app/useAppNavigation'
 import { useReportState } from './app/useReportState'
+import { useRoleAdmin } from './app/useRoleAdmin'
+import { useAssortmentPresence } from './app/useAssortmentPresence'
 import AdminArchive from './components/archive/AdminArchive.vue'
 import ScheduleView from './components/schedule/ScheduleView.vue'
 import AuthView from './components/shared/AuthView.vue'
@@ -32,17 +34,6 @@ let suppressReportAutosave = false
 const profileView = ref('main')
 const permissions = ref(null)
 const isSuperAdmin = ref(false)
-const rolePermissions = ref([])
-const roleSettingsBusy = ref(false)
-const roleUsers = ref([])
-const roleUsersLoading = ref(false)
-const roleUserUpdatingId = ref(null)
-const assortmentCollabStatus = ref({
-  activeEditors: [],
-  lastChangedAt: null,
-  lastChangedBy: null,
-})
-let assortmentPresenceTimer = null
 
 const userRole = computed(() => currentUser.value?.role || null)
 const userName = computed(() => currentUser.value?.name || 'Сотрудник')
@@ -92,6 +83,18 @@ const {
   canAccessSchedule,
 })
 const { maybeAskForPushPermission } = usePushBootstrap({ notificationsApi })
+const {
+  assortmentEditorsLabel,
+  assortmentLastChangedLabel,
+  ensureAssortmentPresence,
+  stopAssortmentPresence,
+  clearAssortmentPresence,
+} = useAssortmentPresence({
+  editingApi,
+  canManageProducts,
+  activeTab,
+  profileView,
+})
 
 const fetchAppData = async () => {
   appLoading.value = true
@@ -126,124 +129,26 @@ const loadPermissions = async () => {
   }
 }
 
-const loadRolePermissions = async () => {
-  if (!canManageRoles.value) {
-    rolePermissions.value = []
-    return
-  }
-
-  roleSettingsBusy.value = true
-  try {
-    const response = await authApi.rolePermissions()
-    rolePermissions.value = response.roles || []
-  } catch (error) {
-    alert(error?.message || 'Не удалось загрузить настройки ролей')
-  } finally {
-    roleSettingsBusy.value = false
-  }
-}
-
-const toggleRolePermission = (roleKey, permissionKey) => {
-  rolePermissions.value = rolePermissions.value.map((row) => {
-    if (row.role !== roleKey) return row
-    return {
-      ...row,
-      permissions: {
-        ...row.permissions,
-        [permissionKey]: !row.permissions?.[permissionKey],
-      },
-    }
-  })
-}
-
-const saveRolePermissions = async () => {
-  if (!canManageRoles.value) return
-
-  roleSettingsBusy.value = true
-  try {
-    const payload = rolePermissions.value
-      .filter((row) => row.role === 'chef' || row.role === 'employee')
-      .map((row) => ({
-        role: row.role,
-        permissions: {
-          reportEdit: Boolean(row.permissions?.reportEdit),
-          productsManage: Boolean(row.permissions?.productsManage),
-          scheduleManage: Boolean(row.permissions?.scheduleManage),
-          auditView: Boolean(row.permissions?.auditView),
-          rolesManage: Boolean(row.permissions?.rolesManage),
-        },
-      }))
-
-    const response = await authApi.updateRolePermissions(payload)
-    rolePermissions.value = response.roles || []
-    await loadPermissions()
-    alert('Права ролей обновлены')
-  } catch (error) {
-    alert(error?.message || 'Не удалось сохранить настройки ролей')
-  } finally {
-    roleSettingsBusy.value = false
-  }
-}
-
-const canEditUserRole = (targetUser) => {
-  if (!canManageRoles.value) return false
-  if (!targetUser) return false
-  if (targetUser.isSuperAdmin) return isSuperAdmin.value
-  if (isSuperAdmin.value) return true
-  return targetUser.role !== 'admin'
-}
-
-const loadRoleUsers = async () => {
-  if (!canManageRoles.value) {
-    roleUsers.value = []
-    return
-  }
-
-  roleUsersLoading.value = true
-  try {
-    const response = await authApi.users()
-    roleUsers.value = (response.users || []).map((user) => ({
-      ...user,
-      pendingRole: user.role,
-    }))
-  } catch (error) {
-    alert(error?.message || 'Не удалось загрузить список пользователей')
-  } finally {
-    roleUsersLoading.value = false
-  }
-}
-
-const updateRoleUserDraft = (targetUser, role) => {
-  roleUsers.value = roleUsers.value.map((item) =>
-    item.id === targetUser.id ? { ...item, pendingRole: role } : item,
-  )
-}
-
-const changeUserRole = async (targetUser) => {
-  if (!canEditUserRole(targetUser)) return
-  if (targetUser.id === currentUser.value?.id && !isSuperAdmin.value) {
-    alert('Вы не можете менять свою роль')
-    return
-  }
-
-  const nextRole = targetUser.pendingRole || targetUser.role
-  if (nextRole === targetUser.role) return
-
-  roleUserUpdatingId.value = targetUser.id
-  try {
-    const response = await authApi.updateUserRole(targetUser.id, nextRole)
-    const updated = response.user
-    roleUsers.value = roleUsers.value.map((item) =>
-      item.id === updated.id ? { ...updated, pendingRole: updated.role } : item,
-    )
-    alert('Роль пользователя обновлена')
-  } catch (error) {
-    alert(error?.message || 'Не удалось изменить роль')
-    await loadRoleUsers()
-  } finally {
-    roleUserUpdatingId.value = null
-  }
-}
+const {
+  rolePermissions,
+  roleSettingsBusy,
+  roleUsers,
+  roleUsersLoading,
+  roleUserUpdatingId,
+  loadRolePermissions,
+  toggleRolePermission,
+  saveRolePermissions,
+  loadRoleUsers,
+  updateRoleUserDraft,
+  changeUserRole,
+  clearRoleAdminState,
+} = useRoleAdmin({
+  authApi,
+  currentUser,
+  canManageRoles,
+  isSuperAdmin,
+  loadPermissions,
+})
 
 const initialize = async () => {
   authLoading.value = true
@@ -263,80 +168,6 @@ const initialize = async () => {
   } finally {
     authLoading.value = false
   }
-}
-
-const formatRelativeTime = (value) => {
-  if (!value) return ''
-  const timestamp = new Date(value).getTime()
-  if (!Number.isFinite(timestamp)) return ''
-
-  const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
-  if (diffSec < 60) return `${diffSec} сек назад`
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin} мин назад`
-  const diffHours = Math.floor(diffMin / 60)
-  return `${diffHours} ч назад`
-}
-
-const assortmentEditorsLabel = computed(() => {
-  const names = assortmentCollabStatus.value.activeEditors.map((item) => item.user_name)
-  if (names.length === 0) return ''
-  if (names.length === 1) return `Сейчас редактирует: ${names[0]}`
-  return `Сейчас редактируют: ${names.join(', ')}`
-})
-
-const assortmentLastChangedLabel = computed(() => {
-  if (!assortmentCollabStatus.value.lastChangedAt) return ''
-  const who = assortmentCollabStatus.value.lastChangedBy
-    ? ` ${assortmentCollabStatus.value.lastChangedBy}`
-    : ''
-  return `Последнее изменение${who}: ${formatRelativeTime(assortmentCollabStatus.value.lastChangedAt)}`
-})
-
-const stopAssortmentPresence = async () => {
-  if (assortmentPresenceTimer) {
-    clearInterval(assortmentPresenceTimer)
-    assortmentPresenceTimer = null
-  }
-
-  if (canManageProducts.value) {
-    try {
-      await editingApi.heartbeat({ resource: 'assortment', active: false })
-    } catch {
-      // noop
-    }
-  }
-}
-
-const syncAssortmentPresence = async () => {
-  if (!canManageProducts.value || activeTab.value !== 'profile' || profileView.value !== 'assortment') {
-    return
-  }
-
-  try {
-    await editingApi.heartbeat({ resource: 'assortment', active: true })
-    const status = await editingApi.status('assortment')
-    assortmentCollabStatus.value = {
-      activeEditors: status.activeEditors || [],
-      lastChangedAt: status.lastChangedAt || null,
-      lastChangedBy: status.lastChangedBy || null,
-    }
-  } catch {
-    // noop
-  }
-}
-
-const ensureAssortmentPresence = async () => {
-  if (!canManageProducts.value || activeTab.value !== 'profile' || profileView.value !== 'assortment') {
-    await stopAssortmentPresence()
-    return
-  }
-
-  await syncAssortmentPresence()
-  if (assortmentPresenceTimer) clearInterval(assortmentPresenceTimer)
-  assortmentPresenceTimer = setInterval(() => {
-    syncAssortmentPresence()
-  }, 8000)
 }
 
 const handleSignIn = async ({ email, password }) => {
@@ -385,14 +216,12 @@ const logout = async () => {
   currentUser.value = null
   permissions.value = null
   isSuperAdmin.value = false
-  rolePermissions.value = []
-  roleUsers.value = []
-  roleUserUpdatingId.value = null
+  clearRoleAdminState()
   navigateTo('main', true)
   clearReportState()
   authMessage.value = ''
   profileView.value = 'main'
-  assortmentCollabStatus.value = { activeEditors: [], lastChangedAt: null, lastChangedBy: null }
+  clearAssortmentPresence()
   stopAssortmentPresence()
 }
 
