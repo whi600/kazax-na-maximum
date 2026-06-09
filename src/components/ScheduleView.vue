@@ -23,6 +23,7 @@ import {
   Bell,
 } from 'lucide-vue-next'
 import SchedulePendingRequestsSheet from './SchedulePendingRequestsSheet.vue'
+import ScheduleAssignModal from './ScheduleAssignModal.vue'
 import ScheduleShiftCard from './ScheduleShiftCard.vue'
 import ScheduleShiftModal from './ScheduleShiftModal.vue'
 import ScheduleWeekControls from './ScheduleWeekControls.vue'
@@ -53,6 +54,13 @@ const selectedWeekStart = ref('')
 const pendingWeekDeleteStart = ref('')
 const isDeletingWeek = ref(false)
 const blockWeekAddUntil = ref(0)
+const isAssignModalOpen = ref(false)
+const assignShift = ref(null)
+const assignableUsers = ref([])
+const assignUsersLoading = ref(false)
+const assignUsersError = ref('')
+const assignBusy = ref(false)
+const selectedAssignUserId = ref(null)
 
 const pendingDeleteIds = ref([])
 const unsavedNewShifts = ref([])
@@ -90,7 +98,11 @@ const canManageSchedule = computed(
 )
 
 const isAnyOverlayOpen = computed(
-  () => isModalOpen.value || showPendingSheet.value || Boolean(pendingWeekDeleteStart.value),
+  () =>
+    isModalOpen.value ||
+    showPendingSheet.value ||
+    isAssignModalOpen.value ||
+    Boolean(pendingWeekDeleteStart.value),
 )
 
 const setStructureSaveStatus = (status) => {
@@ -127,6 +139,12 @@ const modalSubmitLabel = computed(() => {
   if (isExtraShift.value) return 'Отправить заявку'
   if (isEditingShift.value) return 'Сохранить смену'
   return 'Добавить в черновик'
+})
+
+const assignShiftLabel = computed(() => {
+  const shift = assignShift.value
+  if (!shift) return ''
+  return `${formatDateHeader(shift.date)} · ${shift.start_time}-${shift.end_time}`
 })
 
 const structureSaveClass = computed(() => {
@@ -312,6 +330,43 @@ const loadScheduleTemplate = async () => {
   } catch {
     scheduleTemplateShifts.value = DEFAULT_WEEK_TEMPLATE_SHIFTS
   }
+}
+
+const loadAssignableUsers = async () => {
+  if (!canManageSchedule.value) return
+  if (assignableUsers.value.length > 0 || assignUsersLoading.value) return
+
+  assignUsersError.value = ''
+  assignUsersLoading.value = true
+  try {
+    const response = await shiftsApi.assignableUsers()
+    assignableUsers.value = response.users || []
+  } catch (error) {
+    assignUsersError.value = error?.message || 'Не удалось загрузить сотрудников'
+  } finally {
+    assignUsersLoading.value = false
+  }
+}
+
+const reloadAssignableUsers = async () => {
+  assignableUsers.value = []
+  await loadAssignableUsers()
+  if (!selectedAssignUserId.value) {
+    selectedAssignUserId.value = resolveDefaultAssignUserId()
+  }
+}
+
+const resolveDefaultAssignUserId = () => {
+  const currentId = Number(props.currentUser?.id)
+  if (Number.isFinite(currentId)) return currentId
+
+  const currentEmail = String(props.currentUser?.email || '').toLowerCase()
+  const byEmail = assignableUsers.value.find(
+    (user) => String(user.email || '').toLowerCase() === currentEmail,
+  )
+  if (byEmail) return byEmail.id
+
+  return assignableUsers.value[0]?.id || null
 }
 
 const fetchShifts = async ({ preserveDrafts = false, skipDefaultBootstrap = false } = {}) => {
@@ -631,6 +686,81 @@ const bookShift = (shift) => {
       safeAlert(error?.message || 'Ошибка записи')
     }
   })
+}
+
+const findPersistedShift = (draftShift) =>
+  shifts.value.find(
+    (shift) =>
+      shift.date === draftShift.date &&
+      shift.start_time === draftShift.start_time &&
+      shift.end_time === draftShift.end_time &&
+      !shift.employee_name &&
+      (shift.status || 'approved') === 'approved',
+  )
+
+const resolveShiftForServerAction = async (shift) => {
+  if (Number(shift?.id) > 0) return shift
+
+  await saveStructure({ silent: true })
+  await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
+  return findPersistedShift(shift)
+}
+
+const openAssignModal = async (shift) => {
+  if (!canManageSchedule.value || shift.employee_name) return
+  markShiftInteracted(shift)
+
+  const persistedShift = await resolveShiftForServerAction(shift)
+  if (!persistedShift) {
+    safeAlert('Смена еще сохраняется. Попробуйте через секунду')
+    return
+  }
+
+  assignShift.value = persistedShift
+  selectedAssignUserId.value = resolveDefaultAssignUserId()
+  assignUsersError.value = ''
+  isAssignModalOpen.value = true
+  await loadAssignableUsers()
+  if (!selectedAssignUserId.value) {
+    selectedAssignUserId.value = resolveDefaultAssignUserId()
+  }
+}
+
+const closeAssignModal = () => {
+  if (assignBusy.value) return
+  isAssignModalOpen.value = false
+  assignShift.value = null
+}
+
+const assignSelectedUser = async () => {
+  const shift = assignShift.value
+  if (!shift || !selectedAssignUserId.value || assignBusy.value) return
+
+  assignBusy.value = true
+  try {
+    const response = await shiftsApi.assign(shift.id, selectedAssignUserId.value)
+    const employeeName = response.employee_name
+    shifts.value = shifts.value.map((item) =>
+      item.id === shift.id ? { ...item, employee_name: employeeName } : item,
+    )
+    setStructureSaveStatus('saved')
+    isAssignModalOpen.value = false
+    assignShift.value = null
+  } catch (error) {
+    safeAlert(error?.message || 'Не удалось назначить сотрудника')
+    await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
+  } finally {
+    assignBusy.value = false
+  }
+}
+
+const handleBookClick = (shift) => {
+  if (canManageSchedule.value) {
+    openAssignModal(shift)
+    return
+  }
+
+  bookShift(shift)
 }
 
 const cancelBooking = (shift) => {
@@ -1005,7 +1135,7 @@ onBeforeUnmount(() => {
                 :can-self-cancel="canSelfCancelBooking(shift)"
                 :day-delay="`${dayIndex * 80}ms`"
                 :shift-delay="`${shiftIndex * 70}ms`"
-                @book="bookShift(shift)"
+                @book="handleBookClick(shift)"
                 @cancel="cancelBooking(shift)"
                 @edit="openEditModal(shift)"
                 @delete="markForDeletion(shift)"
@@ -1048,6 +1178,20 @@ onBeforeUnmount(() => {
       @update:date="form.date = $event"
       @update:start-time="form.start_time = $event"
       @update:end-time="form.end_time = $event"
+    />
+
+    <ScheduleAssignModal
+      v-if="isAssignModalOpen"
+      :users="assignableUsers"
+      :selected-user-id="selectedAssignUserId"
+      :busy="assignBusy"
+      :loading="assignUsersLoading"
+      :error-message="assignUsersError"
+      :shift-label="assignShiftLabel"
+      @close="closeAssignModal"
+      @update:selected-user-id="selectedAssignUserId = $event"
+      @retry="reloadAssignableUsers"
+      @submit="assignSelectedUser"
     />
 
     <Teleport to="body">

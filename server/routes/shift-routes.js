@@ -10,9 +10,11 @@ import { normalizePersonName } from '../people.js'
 import {
   deleteShiftStatement,
   getShiftByIdStatement,
+  getUserByIdStatement,
   insertShiftStatement,
   listAllShiftsStatement,
   listEmployeeUsersStatement,
+  listScheduleAssignableUsersStatement,
   listUpcomingShiftsStatement,
   listUsersWithScheduleManageStatement,
   updateShiftDetailsStatement,
@@ -39,6 +41,8 @@ const addDaysToDateKey = (dateKey, amount) => {
   date.setUTCDate(date.getUTCDate() + amount)
   return date.toISOString().slice(0, 10)
 }
+
+const isShiftEnded = (shift) => new Date(`${shift.date}T${shift.end_time}`) <= new Date()
 
 const parseWeekDeletePath = (pathname) => {
   const match = pathname.match(/^\/api\/shifts\/week\/(\d{4}-\d{2}-\d{2})$/)
@@ -82,6 +86,22 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
 
     const rows = await listAllShiftsStatement.all()
     json(res, 200, { shifts: rows.map(toShiftDto) })
+    return true
+  }
+
+  if (pathname === '/api/shifts/assignable-users' && req.method === 'GET') {
+    const access = await requirePermission(req, res, 'scheduleManage')
+    if (!access) return true
+
+    const users = (await listScheduleAssignableUsersStatement.all()).map((row) => ({
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      created_at: row.created_at,
+    }))
+
+    json(res, 200, { users })
     return true
   }
 
@@ -396,6 +416,92 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
       }),
     )
     json(res, 200, { ok: true })
+    return true
+  }
+
+  if (req.method === 'PATCH' && shiftAction.action === 'assign') {
+    const authPermissions = await getUserPermissions(authUser)
+    if (!authPermissions.scheduleManage) {
+      forbidden(res)
+      return true
+    }
+
+    if (shift.employee_name) {
+      badRequest(res, 'Смена уже занята')
+      return true
+    }
+
+    if (isShiftEnded(shift)) {
+      badRequest(res, 'Нельзя назначить сотрудника на прошедшую смену')
+      return true
+    }
+
+    const body = await readJsonBody(req)
+    const targetUserId = Number(body.userId)
+    if (!Number.isFinite(targetUserId)) {
+      badRequest(res, 'Выберите сотрудника')
+      return true
+    }
+
+    const targetUser = await getUserByIdStatement.get(targetUserId)
+    if (!targetUser) {
+      notFound(res, 'Пользователь не найден')
+      return true
+    }
+
+    const overlappingShift = (
+      await db.query(
+        `
+          SELECT id, date, start_time, end_time, employee_name
+          FROM shifts
+          WHERE id <> $1
+            AND date = $2
+            AND deleted_at IS NULL
+            AND status = 'approved'
+            AND LOWER(TRIM(employee_name)) = LOWER(TRIM($3))
+            AND start_time < $4
+            AND end_time > $5
+          LIMIT 1
+        `,
+        [shiftAction.id, shift.date, targetUser.name, shift.end_time, shift.start_time],
+      )
+    ).rows[0]
+
+    if (overlappingShift) {
+      badRequest(
+        res,
+        `У сотрудника уже есть смена ${overlappingShift.start_time}-${overlappingShift.end_time}`,
+      )
+      return true
+    }
+
+    await updateShiftEmployeeStatement.run(targetUser.name, shiftAction.id)
+    await touchResource('schedule', authUser)
+    await logAudit({
+      actorUser: authUser,
+      entityType: 'shift',
+      entityId: shiftAction.id,
+      action: 'shift.assign',
+      before: shift,
+      after: { ...shift, employee_name: targetUser.name },
+      context: { assignedUserId: targetUser.id, assignedUserName: targetUser.name },
+    })
+
+    if (targetUser.id !== authUser.id) {
+      await notifyUsers(
+        [targetUser.id],
+        'shifts',
+        buildPushPayload({
+          title: 'Вас поставили на смену',
+          body: `${formatShiftLabel(shift)}. Назначил: ${authUser.name}`,
+          url: '/schedule',
+          tag: `shift-assigned-${shiftAction.id}`,
+          urgency: 'high',
+        }),
+      )
+    }
+
+    json(res, 200, { ok: true, employee_name: targetUser.name })
     return true
   }
 

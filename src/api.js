@@ -74,6 +74,7 @@ export const recordsApi = {
 export const shiftsApi = {
   upcoming: () => apiRequest('/api/shifts/upcoming', { method: 'GET' }),
   archive: () => apiRequest('/api/shifts/archive', { method: 'GET' }),
+  assignableUsers: () => apiRequest('/api/shifts/assignable-users', { method: 'GET' }),
   template: () => apiRequest('/api/schedule-template', { method: 'GET' }),
   updateTemplate: (shifts) =>
     apiRequest('/api/schedule-template', {
@@ -105,6 +106,11 @@ export const shiftsApi = {
       body: JSON.stringify(payload),
     }),
   book: (id) => apiRequest(`/api/shifts/${id}/book`, { method: 'PATCH' }),
+  assign: (id, userId) =>
+    apiRequest(`/api/shifts/${id}/assign`, {
+      method: 'PATCH',
+      body: JSON.stringify({ userId }),
+    }),
   unbook: (id) => apiRequest(`/api/shifts/${id}/unbook`, { method: 'PATCH' }),
   approve: (id) => apiRequest(`/api/shifts/${id}/approve`, { method: 'PATCH' }),
   remove: (id) => apiRequest(`/api/shifts/${id}`, { method: 'DELETE' }),

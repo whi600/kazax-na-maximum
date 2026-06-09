@@ -30,6 +30,12 @@ export const listUsersWithScheduleManageStatement = db.prepare(`
   ORDER BY u.created_at DESC, u.id DESC
 `)
 
+export const listScheduleAssignableUsersStatement = db.prepare(`
+  SELECT id, email, name, role, created_at
+  FROM users
+  ORDER BY LOWER(name) ASC, id ASC
+`)
+
 export const listEmployeeUsersStatement = db.prepare(`
   SELECT id, email, name, role, created_at
   FROM users
