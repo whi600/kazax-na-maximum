@@ -26,6 +26,7 @@ import { useScheduleBooking } from './composables/useScheduleBooking'
 import { useScheduleData } from './composables/useScheduleData'
 import { useOverlayScrollLock } from './composables/useOverlayScrollLock'
 import { useSchedulePresence } from './composables/useSchedulePresence'
+import { useScheduleShiftModal } from './composables/useScheduleShiftModal'
 
 const props = defineProps({
   userRole: { type: String, default: '' },
@@ -41,9 +42,6 @@ const props = defineProps({
 
 const emit = defineEmits(['pending-count'])
 
-const isModalOpen = ref(false)
-const isExtraShift = ref(false)
-const editingShiftId = ref(null)
 const showPendingSheet = ref(false)
 const pendingWeekDeleteStart = ref('')
 const isDeletingWeek = ref(false)
@@ -56,8 +54,6 @@ let structureAutosaveTimer = null
 let suppressStructureAutosave = false
 const weekHoldTriggered = ref(false)
 let weekHoldTimer = null
-
-const form = ref({ date: '', start_time: '09:00', end_time: '18:00' })
 
 const safeAlert = (message) => alert(message)
 const safeConfirm = (message, callback) => callback(window.confirm(message))
@@ -99,6 +95,23 @@ const {
   safeAlert,
 })
 
+const {
+  isModalOpen,
+  isExtraShift,
+  editingShiftId,
+  form,
+  isEditingShift,
+  modalEyebrow,
+  modalTitle,
+  modalSubmitLabel,
+  openModal,
+  openEditModal,
+  closeModal,
+} = useScheduleShiftModal({
+  canManageSchedule,
+  markShiftInteracted,
+})
+
 const isAnyOverlayOpen = computed(
   () =>
     isModalOpen.value ||
@@ -124,23 +137,6 @@ const structureSaveLabel = computed(() => {
   if (structureSaveStatus.value === 'error') return 'Ошибка сохранения'
   if (structureSaveStatus.value === 'saved') return 'Сохранено'
   return ''
-})
-
-const isEditingShift = computed(() => editingShiftId.value !== null)
-const modalEyebrow = computed(() => {
-  if (isExtraShift.value) return 'Заявка на помощь'
-  if (isEditingShift.value) return 'Редактирование смены'
-  return 'Создание смены'
-})
-const modalTitle = computed(() => {
-  if (isExtraShift.value) return 'Нужна помощь'
-  if (isEditingShift.value) return 'Изменить смену'
-  return 'Новая смена'
-})
-const modalSubmitLabel = computed(() => {
-  if (isExtraShift.value) return 'Отправить заявку'
-  if (isEditingShift.value) return 'Сохранить смену'
-  return 'Добавить в черновик'
 })
 
 const structureSaveClass = computed(() => {
@@ -344,37 +340,6 @@ const addNextWeekTemplate = () => {
 
   unsavedNewShifts.value.push(...missing.map(makeTempShift))
   selectedWeekStart.value = nextWeek
-}
-
-const openModal = (date = null, isHelp = false) => {
-  isExtraShift.value = isHelp
-  editingShiftId.value = null
-  form.value = {
-    date: date || new Date().toISOString().split('T')[0],
-    start_time: '09:00',
-    end_time: '18:00',
-  }
-  isModalOpen.value = true
-}
-
-const openEditModal = (shift) => {
-  if (!canManageSchedule.value || !shift) return
-  markShiftInteracted(shift)
-
-  isExtraShift.value = false
-  editingShiftId.value = shift.id
-  form.value = {
-    date: shift.date,
-    start_time: shift.start_time,
-    end_time: shift.end_time,
-  }
-  isModalOpen.value = true
-}
-
-const closeModal = () => {
-  editingShiftId.value = null
-  isExtraShift.value = false
-  isModalOpen.value = false
 }
 
 defineExpose({

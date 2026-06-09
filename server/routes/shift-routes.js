@@ -1,11 +1,7 @@
 import { getUserPermissions, requirePermission, requireUser } from '../auth.js'
 import { logAudit, touchResource } from '../audit.js'
 import { badRequest, forbidden, json, notFound, readJsonBody } from '../http.js'
-import {
-  buildPushPayload,
-  notifyUserByName,
-  notifyUsers,
-} from '../notifications.js'
+import { buildPushPayload, notifyUserByName, notifyUsers } from '../notifications.js'
 import { normalizePersonName } from '../people.js'
 import {
   deleteShiftStatement,
@@ -16,7 +12,6 @@ import {
   listEmployeeUsersStatement,
   listScheduleAssignableUsersStatement,
   listUpcomingShiftsStatement,
-  listUsersWithScheduleManageStatement,
   updateShiftDetailsStatement,
   updateShiftEmployeeStatement,
   updateShiftStatusStatement,
@@ -25,56 +20,19 @@ import {
   formatShiftLabel,
   getCurrentWeekStartDate,
   isValidShiftRange,
-  listUserIds,
   notifyNewFreeShifts,
   parseShiftId,
   toShiftDto,
 } from '../api-utils.js'
-
-const WEEK_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-const SELF_UNBOOK_LOCK_MS = 48 * 60 * 60 * 1000
-
-const getScheduleManagerIds = async (excludeUserId = null) =>
-  listUserIds(listUsersWithScheduleManageStatement, excludeUserId)
-
-const addDaysToDateKey = (dateKey, amount) => {
-  const date = new Date(`${dateKey}T00:00:00.000Z`)
-  date.setUTCDate(date.getUTCDate() + amount)
-  return date.toISOString().slice(0, 10)
-}
-
-const isShiftEnded = (shift) => new Date(`${shift.date}T${shift.end_time}`) <= new Date()
-
-const isShiftSelfUnbookLocked = (shift) => {
-  const startTime = new Date(`${shift.date}T${shift.start_time}`).getTime()
-  return startTime - Date.now() < SELF_UNBOOK_LOCK_MS
-}
-
-const parseWeekDeletePath = (pathname) => {
-  const match = pathname.match(/^\/api\/shifts\/week\/(\d{4}-\d{2}-\d{2})$/)
-  return match ? match[1] : null
-}
-
-const notifyShiftDeleted = async ({ shift, actorUser, tagId, title = 'Смена удалена' }) => {
-  if (
-    !shift.employee_name ||
-    normalizePersonName(shift.employee_name) === normalizePersonName(actorUser.name)
-  ) {
-    return
-  }
-
-  await notifyUserByName(
-    shift.employee_name,
-    'shifts',
-    buildPushPayload({
-      title,
-      body: formatShiftLabel(shift),
-      url: '/schedule',
-      tag: `shift-deleted-${tagId}`,
-      urgency: 'high',
-    }),
-  )
-}
+import {
+  getScheduleManagerIds,
+  isShiftEnded,
+  isShiftSelfUnbookLocked,
+  notifyShiftDeleted,
+  parseWeekDeletePath,
+} from './shift-route-utils.js'
+import { handleBulkSaveShifts } from './shift-bulk-handlers.js'
+import { handleDeleteShiftWeek } from './shift-week-handlers.js'
 
 export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
   if (pathname === '/api/shifts/upcoming' && req.method === 'GET') {
@@ -113,74 +71,7 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
 
   const weekStartToDelete = parseWeekDeletePath(pathname)
   if (weekStartToDelete && req.method === 'DELETE') {
-    const access = await requirePermission(req, res, 'scheduleManage')
-    if (!access) return true
-    const { user } = access
-
-    if (!WEEK_DATE_PATTERN.test(weekStartToDelete)) {
-      badRequest(res, 'Некорректная неделя')
-      return true
-    }
-
-    const weekEnd = addDaysToDateKey(weekStartToDelete, 6)
-    const deletedSnapshot = await db.transaction(async (client) => {
-      const shifts = (
-        await client.query(
-          `
-            SELECT id, date, start_time, end_time, employee_name, status, created_by
-            FROM shifts
-            WHERE date >= $1
-              AND date <= $2
-              AND deleted_at IS NULL
-            ORDER BY date ASC, start_time ASC
-          `,
-          [weekStartToDelete, weekEnd],
-        )
-      ).rows
-
-      if (shifts.some((shift) => Boolean(shift.employee_name))) {
-        const error = new Error('Нельзя удалить неделю: есть смены с записью сотрудников')
-        error.statusCode = 400
-        throw error
-      }
-
-      for (const shift of shifts) {
-        await deleteShiftStatement.runOn(client, user.id, 'week_delete', shift.id)
-      }
-
-      return shifts
-    }).catch((error) => {
-      if (error.statusCode === 400) return error
-      throw error
-    })
-
-    if (deletedSnapshot instanceof Error) {
-      badRequest(res, deletedSnapshot.message)
-      return true
-    }
-
-    await touchResource('schedule', user)
-    if (deletedSnapshot.length > 0) {
-      await logAudit({
-        actorUser: user,
-        entityType: 'shift',
-        action: 'shift.week_delete',
-        before: { deleted: deletedSnapshot },
-        context: {
-          weekStart: weekStartToDelete,
-          weekEnd,
-          deletedCount: deletedSnapshot.length,
-        },
-      })
-    }
-    await Promise.all(
-      deletedSnapshot.map((shift) =>
-        notifyShiftDeleted({ shift, actorUser: user, tagId: shift.id }),
-      ),
-    )
-
-    json(res, 200, { ok: true, deletedCount: deletedSnapshot.length })
-    return true
+    return handleDeleteShiftWeek({ req, res, db, weekStart: weekStartToDelete })
   }
 
   if (pathname === '/api/shifts/help-request' && req.method === 'POST') {
@@ -304,82 +195,7 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
   }
 
   if (pathname === '/api/shifts/bulk-save' && req.method === 'POST') {
-    const access = await requirePermission(req, res, 'scheduleManage')
-    if (!access) return true
-    const { user } = access
-
-    const body = await readJsonBody(req)
-    const deletedIds = Array.isArray(body.deletedIds) ? body.deletedIds : []
-    const newShifts = Array.isArray(body.newShifts) ? body.newShifts : []
-
-    const { deletedSnapshot, createdIds, createdShifts } = await db.transaction(async (client) => {
-      const deletedSnapshot = []
-      for (const id of deletedIds) {
-        const shiftId = Number(id)
-        if (!Number.isFinite(shiftId)) continue
-        const existingShift = await getShiftByIdStatement.getOn(client, shiftId)
-        if (existingShift) deletedSnapshot.push(existingShift)
-        await deleteShiftStatement.runOn(client, user.id, 'bulk_save', shiftId)
-      }
-
-      const createdIds = []
-      const createdShifts = []
-      for (const shift of newShifts) {
-        const date = String(shift.date || '')
-        const startTime = String(shift.start_time || '')
-        const endTime = String(shift.end_time || '')
-        if (!date || !startTime || !endTime) continue
-        if (!isValidShiftRange(startTime, endTime)) continue
-
-        const result = await insertShiftStatement.runOn(
-          client,
-          date,
-          startTime,
-          endTime,
-          null,
-          'approved',
-          user.id,
-        )
-        const id = Number(result.lastInsertRowid)
-        createdIds.push(id)
-        createdShifts.push({
-          id,
-          date,
-          start_time: startTime,
-          end_time: endTime,
-        })
-      }
-
-      return { deletedSnapshot, createdIds, createdShifts }
-    })
-
-    await touchResource('schedule', user)
-    if (deletedSnapshot.length > 0 || createdIds.length > 0) {
-      await logAudit({
-        actorUser: user,
-        entityType: 'shift',
-        action: 'shift.bulk_save',
-        before: { deleted: deletedSnapshot },
-        after: { createdIds, createdCount: createdIds.length },
-        context: {
-          deletedCount: deletedSnapshot.length,
-          createdCount: createdIds.length,
-        },
-      })
-    }
-    await notifyNewFreeShifts({
-      shifts: createdShifts,
-      actorUser: user,
-      listEmployeeUsersStatement,
-    })
-    await Promise.all(
-      deletedSnapshot.map((shift) =>
-        notifyShiftDeleted({ shift, actorUser: user, tagId: shift.id }),
-      ),
-    )
-
-    json(res, 200, { ok: true, createdIds })
-    return true
+    return handleBulkSaveShifts({ req, res, db })
   }
 
   const shiftAction = parseShiftId(pathname)
