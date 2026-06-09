@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { editingApi, shiftsApi } from '../api'
+import { editingApi, shiftsApi } from '../../api'
 import {
   addDays,
   createDefaultWeekTemplate,
@@ -17,7 +17,7 @@ import {
   parseDate,
   pickMissingTemplateShifts,
   toDateKey,
-} from '../scheduleUtils'
+} from '../../scheduleUtils'
 import {
   Calendar,
   Bell,

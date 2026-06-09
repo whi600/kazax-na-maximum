@@ -7,13 +7,13 @@ import {
   getNotificationPermission,
   requestPushPermissionAndSubscribe,
 } from './pushNotifications'
-import AdminArchive from './components/AdminArchive.vue'
-import ScheduleView from './components/ScheduleView.vue'
-import AuthView from './components/AuthView.vue'
-import AppHeader from './components/AppHeader.vue'
-import AppBottomNav from './components/AppBottomNav.vue'
-import ReportView from './components/ReportView.vue'
-import AppProfileSection from './components/AppProfileSection.vue'
+import AdminArchive from './components/archive/AdminArchive.vue'
+import ScheduleView from './components/schedule/ScheduleView.vue'
+import AuthView from './components/shared/AuthView.vue'
+import AppHeader from './components/layout/AppHeader.vue'
+import AppBottomNav from './components/layout/AppBottomNav.vue'
+import ReportView from './components/report/ReportView.vue'
+import AppProfileSection from './components/profile/AppProfileSection.vue'
 import {
   RotateCw,
 } from 'lucide-vue-next'

@@ -1,6 +1,6 @@
 <script setup>
 import { Plus } from 'lucide-vue-next'
-import { formatWeekRange } from '../scheduleUtils'
+import { formatWeekRange } from '../../scheduleUtils'
 
 defineProps({
   weekStarts: { type: Array, default: () => [] },

@@ -9,7 +9,7 @@ import {
   SlidersHorizontal,
   UserRound,
 } from 'lucide-vue-next'
-import { notificationsApi } from '../api'
+import { notificationsApi } from '../../api'
 
 defineProps({
   userName: { type: String, required: true },

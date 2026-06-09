@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { notificationsApi } from '../api'
+import { notificationsApi } from '../../api'
 import {
   getCurrentPushSubscription,
   getNotificationPermission,
@@ -8,7 +8,7 @@ import {
   requestPushPermissionAndSubscribe,
   syncPushSubscription,
   unsubscribePushSubscription,
-} from '../pushNotifications'
+} from '../../pushNotifications'
 import {
   ArrowLeft,
   BellRing,

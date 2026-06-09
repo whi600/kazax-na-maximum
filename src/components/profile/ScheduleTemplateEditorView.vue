@@ -1,11 +1,11 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ArrowLeft, Check, Plus, RotateCw, Trash2 } from 'lucide-vue-next'
-import { shiftsApi } from '../api'
+import { shiftsApi } from '../../api'
 import {
   DEFAULT_WEEK_TEMPLATE_SHIFTS,
   normalizeTemplateShift,
-} from '../scheduleUtils'
+} from '../../scheduleUtils'
 
 const emit = defineEmits(['back'])
 

@@ -1,8 +1,8 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { recordsApi, shiftsApi } from '../api'
+import { recordsApi, shiftsApi } from '../../api'
 import { Calendar, Clock, User } from 'lucide-vue-next'
-import NativeDateButton from './NativeDateButton.vue'
+import NativeDateButton from '../shared/NativeDateButton.vue'
 import {
   buildRecordsDaySections,
   formatAuditAction,
@@ -16,7 +16,7 @@ import {
   parseDate,
   parseShiftHours,
   toDateKey,
-} from '../archiveUtils'
+} from '../../archiveUtils'
 
 const props = defineProps({
   lockedMode: { type: String, default: '' },
