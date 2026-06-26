@@ -310,6 +310,13 @@ const markForDeletion = (shift) => {
 
 const approveRequest = async (shift) => {
   try {
+    if (shift.type === 'unbook') {
+      await shiftsApi.approveUnbookRequest(shift.id)
+      await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
+      if (pendingRequests.value.length === 0) showPendingSheet.value = false
+      return
+    }
+
     await shiftsApi.approve(shift.id)
     shift.status = 'approved'
     if (pendingRequests.value.length === 0) showPendingSheet.value = false
@@ -318,10 +325,17 @@ const approveRequest = async (shift) => {
   }
 }
 
-const rejectRequest = async (shiftId) => {
+const rejectRequest = async (request) => {
   try {
-    await shiftsApi.remove(shiftId)
-    shifts.value = shifts.value.filter((shift) => shift.id !== shiftId)
+    if (request?.type === 'unbook') {
+      await shiftsApi.rejectUnbookRequest(request.id)
+      await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
+      if (pendingRequests.value.length === 0) showPendingSheet.value = false
+      return
+    }
+
+    await shiftsApi.remove(request.id)
+    shifts.value = shifts.value.filter((shift) => shift.id !== request.id)
     if (pendingRequests.value.length === 0) showPendingSheet.value = false
   } catch (error) {
     safeAlert(error?.message || 'Не удалось отклонить заявку')

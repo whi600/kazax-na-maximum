@@ -111,6 +111,12 @@ export const shiftsApi = {
       method: 'PATCH',
       body: JSON.stringify({ userId }),
     }),
+  requestUnbook: (id) =>
+    apiRequest(`/api/shifts/${id}/unbook-request`, { method: 'POST' }),
+  approveUnbookRequest: (id) =>
+    apiRequest(`/api/shifts/unbook-requests/${id}/approve`, { method: 'PATCH' }),
+  rejectUnbookRequest: (id) =>
+    apiRequest(`/api/shifts/unbook-requests/${id}/reject`, { method: 'PATCH' }),
   unbook: (id) => apiRequest(`/api/shifts/${id}/unbook`, { method: 'PATCH' }),
   approve: (id) => apiRequest(`/api/shifts/${id}/approve`, { method: 'PATCH' }),
   remove: (id) => apiRequest(`/api/shifts/${id}`, { method: 'DELETE' }),

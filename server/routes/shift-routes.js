@@ -5,13 +5,19 @@ import { buildPushPayload, notifyUserByName, notifyUsers } from '../notification
 import { normalizePersonName } from '../people.js'
 import {
   deleteShiftStatement,
+  createShiftUnbookRequestStatement,
   getShiftByIdStatement,
+  getPendingShiftUnbookRequestStatement,
   getUserByIdStatement,
   insertShiftStatement,
   listAllShiftsStatement,
   listEmployeeUsersStatement,
+  listPendingShiftUnbookRequestsStatement,
   listScheduleAssignableUsersStatement,
   listUpcomingShiftsStatement,
+  listUserPendingShiftUnbookRequestsStatement,
+  listUsersWithScheduleManageStatement,
+  updateShiftUnbookRequestStatusStatement,
   updateShiftDetailsStatement,
   updateShiftEmployeeStatement,
   updateShiftStatusStatement,
@@ -27,20 +33,141 @@ import {
 import {
   getScheduleManagerIds,
   isShiftEnded,
-  isShiftSelfUnbookLocked,
   notifyShiftDeleted,
   parseWeekDeletePath,
 } from './shift-route-utils.js'
 import { handleBulkSaveShifts } from './shift-bulk-handlers.js'
 import { handleDeleteShiftWeek } from './shift-week-handlers.js'
 
+const parseUnbookRequestPath = (pathname) => {
+  const match = pathname.match(/^\/api\/shifts\/unbook-requests\/(\d+)\/(approve|reject)$/)
+  if (!match) return null
+  return { id: Number(match[1]), action: match[2] }
+}
+
+const toUnbookRequestDto = (row) => ({
+  id: row.id,
+  type: 'unbook',
+  shift_id: row.shift_id,
+  requester_user_id: row.requester_user_id,
+  requester_name: row.requester_name,
+  employee_name: row.requester_name,
+  status: row.status || 'pending',
+  created_at: row.created_at,
+  date: row.date,
+  start_time: row.start_time,
+  end_time: row.end_time,
+})
+
+const attachUnbookRequestToShift = (shift, requestByShiftId) => ({
+  ...toShiftDto(shift),
+  unbook_request: requestByShiftId.get(Number(shift.id)) || null,
+})
+
 export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
+  const unbookRequestAction = parseUnbookRequestPath(pathname)
+  if (unbookRequestAction && req.method === 'PATCH') {
+    const access = await requirePermission(req, res, 'scheduleManage')
+    if (!access) return true
+    const { user } = access
+
+    const request = await getPendingShiftUnbookRequestStatement.get(unbookRequestAction.id)
+    if (!request) {
+      notFound(res, 'Заявка не найдена')
+      return true
+    }
+
+    if (unbookRequestAction.action === 'approve') {
+      if (
+        normalizePersonName(request.employee_name) !==
+        normalizePersonName(request.requester_name)
+      ) {
+        badRequest(res, 'Сотрудник уже не записан на эту смену')
+        return true
+      }
+
+      await db.transaction(async (client) => {
+        await updateShiftEmployeeStatement.runOn(client, null, request.shift_id)
+        await updateShiftUnbookRequestStatusStatement.runOn(
+          client,
+          'approved',
+          user.id,
+          request.id,
+        )
+      })
+      await touchResource('schedule', user)
+      await logAudit({
+        actorUser: user,
+        entityType: 'shift',
+        entityId: request.shift_id,
+        action: 'shift.unbook_request_approve',
+        before: request,
+        after: { ...request, employee_name: null, status: 'approved' },
+        context: { requestId: request.id, requesterUserId: request.requester_user_id },
+      })
+      await notifyUsers(
+        [request.requester_user_id],
+        'shifts',
+        buildPushPayload({
+          title: 'Заявка на снятие подтверждена',
+          body: formatShiftLabel(request),
+          url: '/schedule',
+          tag: `shift-unbook-request-approved-${request.id}`,
+          urgency: 'high',
+        }),
+      )
+      json(res, 200, { ok: true })
+      return true
+    }
+
+    await updateShiftUnbookRequestStatusStatement.run(
+      'rejected',
+      user.id,
+      request.id,
+    )
+    await touchResource('schedule', user)
+    await logAudit({
+      actorUser: user,
+      entityType: 'shift',
+      entityId: request.shift_id,
+      action: 'shift.unbook_request_reject',
+      before: request,
+      after: { ...request, status: 'rejected' },
+      context: { requestId: request.id, requesterUserId: request.requester_user_id },
+    })
+    await notifyUsers(
+      [request.requester_user_id],
+      'shifts',
+      buildPushPayload({
+        title: 'Заявка на снятие отклонена',
+        body: formatShiftLabel(request),
+        url: '/schedule',
+        tag: `shift-unbook-request-rejected-${request.id}`,
+      }),
+    )
+    json(res, 200, { ok: true })
+    return true
+  }
+
   if (pathname === '/api/shifts/upcoming' && req.method === 'GET') {
     const user = await requireUser(req, res)
     if (!user) return true
 
-    const rows = await listUpcomingShiftsStatement.all(getCurrentWeekStartDate())
-    json(res, 200, { shifts: rows.map(toShiftDto) })
+    const weekStart = getCurrentWeekStartDate()
+    const rows = await listUpcomingShiftsStatement.all(weekStart)
+    const permissions = await getUserPermissions(user)
+    const unbookRows = permissions.scheduleManage
+      ? await listPendingShiftUnbookRequestsStatement.all(weekStart)
+      : await listUserPendingShiftUnbookRequestsStatement.all(user.id, weekStart)
+    const unbookRequests = unbookRows.map(toUnbookRequestDto)
+    const requestByShiftId = new Map(
+      unbookRequests.map((request) => [Number(request.shift_id), request]),
+    )
+
+    json(res, 200, {
+      shifts: rows.map((shift) => attachUnbookRequestToShift(shift, requestByShiftId)),
+      unbookRequests: permissions.scheduleManage ? unbookRequests : [],
+    })
     return true
   }
 
@@ -210,6 +337,68 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
     return true
   }
 
+  if (req.method === 'POST' && shiftAction.action === 'unbook-request') {
+    if (!shift.employee_name) {
+      badRequest(res, 'На смене нет сотрудника')
+      return true
+    }
+
+    if (isShiftEnded(shift)) {
+      badRequest(res, 'Нельзя отправить заявку по прошедшей смене')
+      return true
+    }
+
+    if (
+      normalizePersonName(shift.employee_name) !== normalizePersonName(authUser.name)
+    ) {
+      forbidden(res)
+      return true
+    }
+
+    const result = await createShiftUnbookRequestStatement.run(
+      shiftAction.id,
+      authUser.id,
+      authUser.name,
+    )
+    await touchResource('schedule', authUser)
+    await logAudit({
+      actorUser: authUser,
+      entityType: 'shift',
+      entityId: shiftAction.id,
+      action: 'shift.unbook_request',
+      before: shift,
+      context: { requestId: Number(result.lastInsertRowid) },
+    })
+    const scheduleManagers = await getScheduleManagerIds(authUser.id)
+    await notifyUsers(
+      scheduleManagers,
+      'shifts',
+      buildPushPayload({
+        title: 'Заявка на снятие со смены',
+        body: `${authUser.name}: ${formatShiftLabel(shift)}`,
+        url: '/schedule',
+        tag: `shift-unbook-request-${shiftAction.id}-${authUser.id}`,
+        urgency: 'high',
+      }),
+    )
+
+    json(res, 201, {
+      request: toUnbookRequestDto({
+        id: Number(result.lastInsertRowid),
+        shift_id: shiftAction.id,
+        requester_user_id: authUser.id,
+        requester_name: authUser.name,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        date: shift.date,
+        start_time: shift.start_time,
+        end_time: shift.end_time,
+        employee_name: shift.employee_name,
+      }),
+    })
+    return true
+  }
+
   if (req.method === 'PATCH' && shiftAction.action === 'book') {
     if (shift.employee_name) {
       badRequest(res, 'Смена уже занята')
@@ -268,32 +457,6 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
     const targetUser = await getUserByIdStatement.get(targetUserId)
     if (!targetUser) {
       notFound(res, 'Пользователь не найден')
-      return true
-    }
-
-    const overlappingShift = (
-      await db.query(
-        `
-          SELECT id, date, start_time, end_time, employee_name
-          FROM shifts
-          WHERE id <> $1
-            AND date = $2
-            AND deleted_at IS NULL
-            AND status = 'approved'
-            AND LOWER(TRIM(employee_name)) = LOWER(TRIM($3))
-            AND start_time < $4
-            AND end_time > $5
-          LIMIT 1
-        `,
-        [shiftAction.id, shift.date, targetUser.name, shift.end_time, shift.start_time],
-      )
-    ).rows[0]
-
-    if (overlappingShift) {
-      badRequest(
-        res,
-        `У сотрудника уже есть смена ${overlappingShift.start_time}-${overlappingShift.end_time}`,
-      )
       return true
     }
 
@@ -381,19 +544,8 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
 
   if (req.method === 'PATCH' && shiftAction.action === 'unbook') {
     const authPermissions = await getUserPermissions(authUser)
-    const isSelfUnbook =
-      normalizePersonName(shift.employee_name) === normalizePersonName(authUser.name)
-
-    if (
-      !authPermissions.scheduleManage &&
-      !isSelfUnbook
-    ) {
+    if (!authPermissions.scheduleManage) {
       forbidden(res)
-      return true
-    }
-
-    if (!authPermissions.scheduleManage && isShiftSelfUnbookLocked(shift)) {
-      badRequest(res, 'Нельзя сняться со смены меньше чем за 48 часов до начала')
       return true
     }
 

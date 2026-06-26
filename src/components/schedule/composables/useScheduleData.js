@@ -21,6 +21,7 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
   const selectedWeekStart = ref('')
   const pendingDeleteIds = ref([])
   const unsavedNewShifts = ref([])
+  const unbookRequests = ref([])
   const recentNewShiftIds = ref([])
   const dismissedNewShiftIds = ref([])
   let tempShiftSeq = 0
@@ -75,6 +76,7 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
       const previousWeekStart = selectedWeekStart.value
       const response = await shiftsApi.upcoming()
       shifts.value = response.shifts || []
+      unbookRequests.value = response.unbookRequests || []
 
       const approvedServerShifts = shifts.value.filter(
         (shift) => (shift.status || 'approved') === 'approved',
@@ -216,7 +218,12 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
   })
 
   const pendingRequests = computed(() =>
-    shifts.value.filter((shift) => (shift.status || 'approved') === 'pending'),
+    [
+      ...shifts.value
+        .filter((shift) => (shift.status || 'approved') === 'pending')
+        .map((shift) => ({ ...shift, type: 'help' })),
+      ...unbookRequests.value,
+    ],
   )
 
   const initializeScheduleData = async ({ resolveUserName, setSuppressAutosave }) => {
@@ -234,6 +241,7 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
     selectedWeekStart,
     pendingDeleteIds,
     unsavedNewShifts,
+    unbookRequests,
     recentNewShiftIds,
     dismissedNewShiftIds,
     approvedShifts,

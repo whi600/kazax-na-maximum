@@ -1,9 +1,10 @@
 import { computed, ref } from 'vue'
 import { recordsApi } from '../api'
 
-export const useReportState = ({ canEditReport, canManageProducts }) => {
+export const useReportState = ({ canManageProducts }) => {
   const products = ref([])
   const dailyEntries = ref([])
+  const reportCanEditToday = ref(false)
   const reportSaveStatus = ref('idle')
   const productSaveBusy = ref(false)
   const editingProductId = ref(null)
@@ -31,6 +32,7 @@ export const useReportState = ({ canEditReport, canManageProducts }) => {
 
   const loadReportData = async () => {
     const [, todayResponse] = await Promise.all([loadProducts(), recordsApi.today()])
+    reportCanEditToday.value = Boolean(todayResponse.canEdit)
     dailyEntries.value = (todayResponse.entries || []).map((entry) => ({
       product_id: entry.product_id,
       name: entry.name,
@@ -42,7 +44,7 @@ export const useReportState = ({ canEditReport, canManageProducts }) => {
   }
 
   const onAddProduct = (product) => {
-    if (!canEditReport.value) return
+    if (!reportCanEditToday.value) return
 
     if (!dailyEntries.value.find((entry) => entry.product_id === product.id)) {
       dailyEntries.value.unshift({
@@ -57,7 +59,7 @@ export const useReportState = ({ canEditReport, canManageProducts }) => {
   }
 
   const removeReportEntry = (entry) => {
-    if (!canEditReport.value) return
+    if (!reportCanEditToday.value) return
 
     const idx = dailyEntries.value.indexOf(entry)
     if (idx > -1) dailyEntries.value.splice(idx, 1)
@@ -113,7 +115,7 @@ export const useReportState = ({ canEditReport, canManageProducts }) => {
   })
 
   const saveReport = async ({ silent = false, autosave = false } = {}) => {
-    if (!canEditReport.value) return
+    if (!reportCanEditToday.value) return
 
     if (autosave) {
       setReportSaveStatus('saving')
@@ -134,7 +136,7 @@ export const useReportState = ({ canEditReport, canManageProducts }) => {
   }
 
   const scheduleReportAutosave = ({ currentUser, activeTab }) => {
-    if (!currentUser.value || !canEditReport.value) return
+    if (!currentUser.value || !reportCanEditToday.value) return
     if (activeTab.value !== 'main') return
 
     if (reportAutosaveTimer) clearTimeout(reportAutosaveTimer)
@@ -209,6 +211,7 @@ export const useReportState = ({ canEditReport, canManageProducts }) => {
   const clearReportState = () => {
     products.value = []
     dailyEntries.value = []
+    reportCanEditToday.value = false
     setReportSaveStatus('idle')
     resetProductForm()
   }
@@ -221,6 +224,7 @@ export const useReportState = ({ canEditReport, canManageProducts }) => {
   return {
     products,
     dailyEntries,
+    reportCanEditToday,
     reportSaveLabel,
     reportSaveClass,
     productSaveBusy,

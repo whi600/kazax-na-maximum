@@ -53,28 +53,28 @@ const emit = defineEmits(['close', 'reject', 'approve'])
                 </p>
               </div>
               <span class="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[9px] font-black uppercase text-blue-600">
-                Помочь
+                {{ request.type === 'unbook' ? 'Снятие' : 'Помочь' }}
               </span>
             </div>
 
             <p class="mb-3 text-[11px] font-black uppercase text-blue-600">
-              {{ request.employee_name }}
+              {{ request.requester_name || request.employee_name }}
             </p>
 
             <div class="grid grid-cols-2 gap-2">
               <button
-                @click="emit('reject', request.id)"
+                @click="emit('reject', request)"
                 class="flex items-center justify-center gap-1.5 rounded-lg bg-red-50 py-3 text-[10px] font-black uppercase text-red-500 transition-all active:scale-95"
               >
                 <X class="h-4 w-4" />
-                Отклонить
+                {{ request.type === 'unbook' ? 'Оставить' : 'Отклонить' }}
               </button>
               <button
                 @click="emit('approve', request)"
                 class="flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-3 text-[10px] font-black uppercase text-white transition-all active:scale-95"
               >
                 <Check class="h-4 w-4" />
-                Подтвердить
+                {{ request.type === 'unbook' ? 'Снять' : 'Подтвердить' }}
               </button>
             </div>
           </div>

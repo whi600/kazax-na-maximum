@@ -1,9 +1,10 @@
 import { requirePermission, requireUser } from '../auth.js'
 import { logAudit, touchResource } from '../audit.js'
-import { badRequest, json, notFound, readJsonBody } from '../http.js'
+import { badRequest, forbidden, json, notFound, readJsonBody } from '../http.js'
 import {
   deleteProductStatement,
   deleteTodayRecordsStatement,
+  getApprovedShiftForUserDateStatement,
   getProductByIdStatement,
   insertDailyRecordStatement,
   insertProductStatement,
@@ -20,6 +21,14 @@ import {
 } from '../api-utils.js'
 
 const REPORT_ARCHIVE_DAYS = 10
+
+const canEditDailyReport = async (user, date) => {
+  if (user?.role === 'admin') return true
+  if (!user?.name) return false
+
+  const shift = await getApprovedShiftForUserDateStatement.get(date, user.name)
+  return Boolean(shift)
+}
 
 export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
   if (pathname === '/api/products' && req.method === 'GET') {
@@ -129,7 +138,8 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
     const user = await requireUser(req, res)
     if (!user) return true
 
-    const rows = await listTodayRecordsStatement.all(getToday())
+    const today = getToday()
+    const rows = await listTodayRecordsStatement.all(today)
     const entries = rows.map((row) => ({
       product_id: row.product_id,
       name: row.name,
@@ -140,18 +150,25 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
       write_off: row.write_off,
     }))
 
-    json(res, 200, { entries })
+    json(res, 200, {
+      entries,
+      canEdit: await canEditDailyReport(user, today),
+    })
     return true
   }
 
   if (pathname === '/api/daily-records/today' && req.method === 'PUT') {
-    const access = await requirePermission(req, res, 'reportEdit')
-    if (!access) return true
-    const { user } = access
+    const user = await requireUser(req, res)
+    if (!user) return true
 
     const body = await readJsonBody(req)
     const entries = Array.isArray(body.entries) ? body.entries : []
     const today = getToday()
+
+    if (!(await canEditDailyReport(user, today))) {
+      forbidden(res, 'Редактировать отчет может только админ или сотрудник со сменой сегодня')
+      return true
+    }
 
     await db.transaction(async (client) => {
       await deleteTodayRecordsStatement.runOn(client, today)

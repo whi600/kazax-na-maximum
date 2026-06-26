@@ -2,8 +2,6 @@ import { computed, ref } from 'vue'
 import { shiftsApi } from '../../../api'
 import { formatDateHeader } from '../../../scheduleUtils'
 
-const SELF_CANCEL_LOCK_MS = 48 * 60 * 60 * 1000
-
 const normalizePersonName = (value) =>
   String(value || '')
     .trim()
@@ -60,11 +58,6 @@ export const useScheduleBooking = ({
     return shiftEnd <= now
   }
 
-  const isShiftSelfCancelLocked = (shift) => {
-    const shiftStart = new Date(`${shift.date}T${shift.start_time}`).getTime()
-    return shiftStart - Date.now() < SELF_CANCEL_LOCK_MS
-  }
-
   const isCurrentUserShift = (shift) => {
     const shiftName = normalizePersonName(shift.employee_name)
     if (!shiftName) return false
@@ -83,7 +76,7 @@ export const useScheduleBooking = ({
   const canSelfCancelBooking = (shift) =>
     isCurrentUserShift(shift) &&
     !isShiftPast(shift) &&
-    !isShiftSelfCancelLocked(shift)
+    !shift.unbook_request
 
   const loadAssignableUsers = async () => {
     if (!canManageSchedule.value) return
@@ -221,23 +214,30 @@ export const useScheduleBooking = ({
       return
     }
 
-    if (
-      !canManageSchedule.value &&
-      isCurrentUserShift(shift) &&
-      isShiftSelfCancelLocked(shift)
-    ) {
-      safeAlert('Нельзя сняться со смены меньше чем за 48 часов до начала')
+    if (!canManageSchedule.value && !isCurrentUserShift(shift)) {
+      safeAlert('Вы можете отправить заявку только по своей смене')
       return
     }
 
-    safeConfirm(`Убрать запись сотрудника ${shift.employee_name}?`, async (ok) => {
+    const message = canManageSchedule.value
+      ? `Убрать запись сотрудника ${shift.employee_name}?`
+      : `Отправить админу заявку на снятие со смены ${shift.start_time}-${shift.end_time}?`
+
+    safeConfirm(message, async (ok) => {
       if (!ok) return
 
       try {
-        await shiftsApi.unbook(shift.id)
-        shift.employee_name = null
+        if (canManageSchedule.value) {
+          await shiftsApi.unbook(shift.id)
+          shift.employee_name = null
+          shift.unbook_request = null
+          return
+        }
+
+        const response = await shiftsApi.requestUnbook(shift.id)
+        shift.unbook_request = response.request
       } catch (error) {
-        safeAlert(error?.message || 'Не удалось убрать запись')
+        safeAlert(error?.message || 'Не удалось отправить заявку')
       }
     })
   }

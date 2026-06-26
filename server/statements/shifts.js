@@ -62,3 +62,94 @@ export const updateShiftDetailsStatement = db.prepare(
 export const deleteShiftStatement = db.prepare(
   "UPDATE shifts SET deleted_at = datetime('now'), deleted_by = ?, delete_reason = ?, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL",
 )
+
+export const getApprovedShiftForUserDateStatement = db.prepare(`
+  SELECT id
+  FROM shifts
+  WHERE date = ?
+    AND status = 'approved'
+    AND deleted_at IS NULL
+    AND LOWER(TRIM(employee_name)) = LOWER(TRIM(?))
+  LIMIT 1
+`)
+
+export const createShiftUnbookRequestStatement = db.prepare(`
+  INSERT INTO shift_unbook_requests(
+    shift_id,
+    requester_user_id,
+    requester_name,
+    status,
+    updated_at
+  )
+  VALUES (?, ?, ?, 'pending', datetime('now'))
+  ON CONFLICT(shift_id, requester_user_id)
+  WHERE status = 'pending'
+  DO UPDATE SET
+    requester_name = excluded.requester_name,
+    updated_at = datetime('now')
+  RETURNING id
+`)
+
+export const getPendingShiftUnbookRequestStatement = db.prepare(`
+  SELECT
+    sur.id,
+    sur.shift_id,
+    sur.requester_user_id,
+    sur.requester_name,
+    sur.status,
+    sur.created_at,
+    s.date,
+    s.start_time,
+    s.end_time,
+    s.employee_name
+  FROM shift_unbook_requests sur
+  JOIN shifts s ON s.id = sur.shift_id
+  WHERE sur.id = ?
+    AND sur.status = 'pending'
+    AND s.deleted_at IS NULL
+  LIMIT 1
+`)
+
+export const listPendingShiftUnbookRequestsStatement = db.prepare(`
+  SELECT
+    sur.id,
+    sur.shift_id,
+    sur.requester_user_id,
+    sur.requester_name,
+    sur.status,
+    sur.created_at,
+    s.date,
+    s.start_time,
+    s.end_time,
+    s.employee_name
+  FROM shift_unbook_requests sur
+  JOIN shifts s ON s.id = sur.shift_id
+  WHERE sur.status = 'pending'
+    AND s.date >= ?
+    AND s.deleted_at IS NULL
+    AND LOWER(TRIM(s.employee_name)) = LOWER(TRIM(sur.requester_name))
+  ORDER BY s.date ASC, s.start_time ASC, sur.created_at ASC
+`)
+
+export const listUserPendingShiftUnbookRequestsStatement = db.prepare(`
+  SELECT
+    sur.id,
+    sur.shift_id,
+    sur.requester_user_id,
+    sur.requester_name,
+    sur.status,
+    sur.created_at
+  FROM shift_unbook_requests sur
+  JOIN shifts s ON s.id = sur.shift_id
+  WHERE sur.status = 'pending'
+    AND sur.requester_user_id = ?
+    AND s.date >= ?
+    AND s.deleted_at IS NULL
+    AND LOWER(TRIM(s.employee_name)) = LOWER(TRIM(sur.requester_name))
+`)
+
+export const updateShiftUnbookRequestStatusStatement = db.prepare(`
+  UPDATE shift_unbook_requests
+  SET status = ?, decided_by = ?, decided_at = datetime('now'), updated_at = datetime('now')
+  WHERE id = ? AND status = 'pending'
+`)

@@ -5,8 +5,6 @@ import { listUsersWithScheduleManageStatement } from '../statements.js'
 
 export const WEEK_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
-const SELF_UNBOOK_LOCK_MS = 48 * 60 * 60 * 1000
-
 export const getScheduleManagerIds = async (excludeUserId = null) =>
   listUserIds(listUsersWithScheduleManageStatement, excludeUserId)
 
@@ -18,11 +16,6 @@ export const addDaysToDateKey = (dateKey, amount) => {
 
 export const isShiftEnded = (shift) =>
   new Date(`${shift.date}T${shift.end_time}`) <= new Date()
-
-export const isShiftSelfUnbookLocked = (shift) => {
-  const startTime = new Date(`${shift.date}T${shift.start_time}`).getTime()
-  return startTime - Date.now() < SELF_UNBOOK_LOCK_MS
-}
 
 export const parseWeekDeletePath = (pathname) => {
   const match = pathname.match(/^\/api\/shifts\/week\/(\d{4}-\d{2}-\d{2})$/)

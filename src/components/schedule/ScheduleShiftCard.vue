@@ -1,5 +1,5 @@
 <script setup>
-import { Pencil, Trash2, X } from 'lucide-vue-next'
+import { Clock3, Pencil, Trash2, X } from 'lucide-vue-next'
 
 defineProps({
   shift: { type: Object, required: true },
@@ -7,6 +7,7 @@ defineProps({
   isNew: { type: Boolean, default: false },
   canManageSchedule: { type: Boolean, default: false },
   canSelfCancel: { type: Boolean, default: false },
+  hasPendingUnbookRequest: { type: Boolean, default: false },
   dayDelay: { type: String, default: '0ms' },
   shiftDelay: { type: String, default: '0ms' },
 })
@@ -59,8 +60,16 @@ const emit = defineEmits(['book', 'cancel', 'edit', 'delete'])
         >
           {{ shift.employee_name }}
         </span>
+        <span
+          v-if="hasPendingUnbookRequest"
+          class="rounded-md bg-amber-50 p-0.5 text-amber-500"
+          aria-label="Заявка на снятие ожидает подтверждения"
+          title="Ожидает подтверждения"
+        >
+          <Clock3 class="h-3.5 w-3.5" />
+        </span>
         <button
-          v-if="!isPast && (canManageSchedule || canSelfCancel)"
+          v-else-if="!isPast && (canManageSchedule || canSelfCancel)"
           @click="emit('cancel')"
           class="p-0.5 text-red-500 transition-colors hover:bg-white rounded-md"
           aria-label="Снять сотрудника со смены"

@@ -40,7 +40,6 @@ const userName = computed(() => currentUser.value?.name || 'Сотрудник')
 const userPermissions = computed(
   () => permissions.value || defaultPermissionsByRole(userRole.value),
 )
-const canEditReport = computed(() => Boolean(userPermissions.value.reportEdit))
 const canManageProducts = computed(() => Boolean(userPermissions.value.productsManage))
 const canManageSchedule = computed(() => Boolean(userPermissions.value.scheduleManage))
 const canViewAudit = computed(() => Boolean(userPermissions.value.auditView))
@@ -51,6 +50,7 @@ const canAccessArchive = computed(() => isChef.value || canViewAudit.value)
 const {
   products,
   dailyEntries,
+  reportCanEditToday,
   reportSaveLabel,
   reportSaveClass,
   productSaveBusy,
@@ -68,7 +68,7 @@ const {
   removeProduct,
   clearReportState,
   cleanupReportTimers,
-} = useReportState({ canEditReport, canManageProducts })
+} = useReportState({ canManageProducts })
 const {
   activeTab,
   pageTitle,
@@ -399,7 +399,7 @@ onBeforeUnmount(() => {
             v-else
             :products="products"
             :daily-entries="dailyEntries"
-            :editable="canEditReport && !isChef"
+            :editable="reportCanEditToday && !isChef"
             @add-product="onAddProduct"
             @remove-entry="removeReportEntry"
           />
@@ -414,7 +414,7 @@ onBeforeUnmount(() => {
       />
 
       <div
-        v-if="activeTab === 'main' && canEditReport && reportSaveLabel"
+        v-if="activeTab === 'main' && reportCanEditToday && reportSaveLabel"
         class="fixed left-1/2 -translate-x-1/2 z-[120] pointer-events-none"
         :style="{ bottom: 'calc(86px + var(--app-safe-bottom))' }"
       >

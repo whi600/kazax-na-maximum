@@ -50,6 +50,7 @@ const emit = defineEmits(['book', 'cancel', 'edit', 'delete'])
           :is-new="isNewShift(shift)"
           :can-manage-schedule="canManageSchedule"
           :can-self-cancel="canSelfCancel(shift)"
+          :has-pending-unbook-request="Boolean(shift.unbook_request)"
           :day-delay="`${dayIndex * 80}ms`"
           :shift-delay="`${shiftIndex * 70}ms`"
           @book="emit('book', shift)"

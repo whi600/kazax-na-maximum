@@ -403,6 +403,29 @@ const migrations = [
         WHERE deleted_at IS NULL;
     `,
   },
+  {
+    name: '014_shift_unbook_requests',
+    sql: `
+      CREATE TABLE IF NOT EXISTS shift_unbook_requests (
+        id SERIAL PRIMARY KEY,
+        shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+        requester_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        requester_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        decided_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_shift_unbook_requests_pending_unique
+        ON shift_unbook_requests(shift_id, requester_user_id)
+        WHERE status = 'pending';
+
+      CREATE INDEX IF NOT EXISTS idx_shift_unbook_requests_status_created
+        ON shift_unbook_requests(status, created_at DESC);
+    `,
+  },
 ]
 
 const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()
