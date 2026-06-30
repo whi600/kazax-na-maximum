@@ -29,8 +29,11 @@ const {
   archiveTabs,
   archiveViewIndex,
   recordsDaySections,
-  visibleRecordsDaySections,
   hasMoreRecordDays,
+  hasMoreShifts,
+  hasMoreAudit,
+  shiftsLoadMoreRef,
+  auditLoadMoreRef,
   auditLogs,
   formatDateTimeLabel,
   formatAuditAction,
@@ -82,7 +85,7 @@ const {
       </div>
 
       <div
-        v-for="section in visibleRecordsDaySections"
+        v-for="section in recordsDaySections"
         :key="section.key"
         class="bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm"
       >
@@ -257,6 +260,13 @@ const {
             </div>
           </div>
         </div>
+        <div
+          v-if="hasMoreShifts"
+          ref="shiftsLoadMoreRef"
+          class="py-2 text-center text-[10px] font-black uppercase text-slate-300"
+        >
+          Загружаем еще...
+        </div>
       </template>
 
       <div v-if="archiveView === 'shiftHours' && periodEmployeeStats.length > 0" class="space-y-2">
@@ -304,6 +314,13 @@ const {
           <p v-if="formatAuditSummary(log)" class="text-[10px] font-bold text-slate-500 mt-1">
             {{ formatAuditSummary(log) }}
           </p>
+        </div>
+        <div
+          v-if="hasMoreAudit"
+          ref="auditLoadMoreRef"
+          class="py-2 text-center text-[10px] font-black uppercase text-slate-300"
+        >
+          Загружаем еще...
         </div>
       </div>
     </div>

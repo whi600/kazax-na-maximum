@@ -59,11 +59,11 @@ const appServer = http.createServer((req, res) => {
       return
     }
 
-    if (await handleProductRecordRoutes({ req, res, pathname, db })) {
+    if (await handleProductRecordRoutes({ req, res, pathname, requestUrl, db })) {
       return
     }
 
-    if (await handleShiftRoutes({ req, res, pathname, db })) {
+    if (await handleShiftRoutes({ req, res, pathname, requestUrl, db })) {
       return
     }
 

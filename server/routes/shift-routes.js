@@ -10,8 +10,9 @@ import {
   getPendingShiftUnbookRequestStatement,
   getUserByIdStatement,
   insertShiftStatement,
-  listAllShiftsStatement,
+  countArchiveShiftsStatement,
   listEmployeeUsersStatement,
+  listArchiveShiftsPageStatement,
   listPendingShiftUnbookRequestsStatement,
   listScheduleAssignableUsersStatement,
   listUpcomingShiftsStatement,
@@ -27,6 +28,7 @@ import {
   getCurrentWeekStartDate,
   isValidShiftRange,
   notifyNewFreeShifts,
+  parseInteger,
   parseShiftId,
   toShiftDto,
 } from '../api-utils.js'
@@ -64,7 +66,7 @@ const attachUnbookRequestToShift = (shift, requestByShiftId) => ({
   unbook_request: requestByShiftId.get(Number(shift.id)) || null,
 })
 
-export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
+export const handleShiftRoutes = async ({ req, res, pathname, requestUrl, db }) => {
   const unbookRequestAction = parseUnbookRequestPath(pathname)
   if (unbookRequestAction && req.method === 'PATCH') {
     const access = await requirePermission(req, res, 'scheduleManage')
@@ -175,8 +177,23 @@ export const handleShiftRoutes = async ({ req, res, pathname, db }) => {
     const user = await requireUser(req, res)
     if (!user) return true
 
-    const rows = await listAllShiftsStatement.all()
-    json(res, 200, { shifts: rows.map(toShiftDto) })
+    const limit = Math.max(
+      1,
+      Math.min(500, parseInteger(requestUrl.searchParams.get('limit'), 10)),
+    )
+    const offset = Math.max(0, parseInteger(requestUrl.searchParams.get('offset'), 0))
+    const [rows, countRow] = await Promise.all([
+      listArchiveShiftsPageStatement.all(limit, offset),
+      countArchiveShiftsStatement.get(),
+    ])
+    const total = Number(countRow?.count || 0)
+    json(res, 200, {
+      shifts: rows.map(toShiftDto),
+      limit,
+      offset,
+      total,
+      hasMore: offset + limit < total,
+    })
     return true
   }
 

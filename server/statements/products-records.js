@@ -71,3 +71,33 @@ export const listArchiveRecordsStatement = db.prepare(`
   WHERE dr.record_date >= ?
   ORDER BY dr.record_date DESC, product_name ASC
 `)
+
+export const listArchiveRecordsPageStatement = db.prepare(`
+  WITH selected_dates AS (
+    SELECT DISTINCT record_date
+    FROM daily_records
+    WHERE record_date >= ?
+    ORDER BY record_date DESC
+    LIMIT ?
+    OFFSET ?
+  )
+  SELECT
+    dr.id,
+    dr.record_date,
+    dr.product_id,
+    dr.arrival,
+    dr.remainder,
+    dr.write_off,
+    COALESCE(p.name, dr.product_name, 'Удален') AS product_name,
+    COALESCE(p.category, dr.product_category, 'other') AS product_category
+  FROM daily_records dr
+  LEFT JOIN products p ON p.id = dr.product_id
+  JOIN selected_dates sd ON sd.record_date = dr.record_date
+  ORDER BY dr.record_date DESC, product_name ASC
+`)
+
+export const countArchiveRecordDaysStatement = db.prepare(`
+  SELECT COUNT(DISTINCT record_date)::int AS count
+  FROM daily_records
+  WHERE record_date >= ?
+`)

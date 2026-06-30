@@ -4,11 +4,12 @@ import { badRequest, forbidden, json, notFound, readJsonBody } from '../http.js'
 import {
   deleteProductStatement,
   deleteTodayRecordsStatement,
+  countArchiveRecordDaysStatement,
   getApprovedShiftForUserDateStatement,
   getProductByIdStatement,
   insertDailyRecordStatement,
   insertProductStatement,
-  listArchiveRecordsStatement,
+  listArchiveRecordsPageStatement,
   listProductsStatement,
   listTodayRecordsStatement,
   updateProductStatement,
@@ -17,6 +18,7 @@ import {
   getRetentionStartDate,
   getToday,
   normalizeProductCategory,
+  parseInteger,
   parseProductId,
 } from '../api-utils.js'
 
@@ -30,7 +32,7 @@ const canEditDailyReport = async (user, date) => {
   return Boolean(shift)
 }
 
-export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
+export const handleProductRecordRoutes = async ({ req, res, pathname, requestUrl, db }) => {
   if (pathname === '/api/products' && req.method === 'GET') {
     const user = await requireUser(req, res)
     if (!user) return true
@@ -212,8 +214,19 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
     const user = await requireUser(req, res)
     if (!user) return true
 
+    const limitDays = Math.max(
+      1,
+      Math.min(10, parseInteger(requestUrl.searchParams.get('limitDays'), 3)),
+    )
+    const offsetDays = Math.max(
+      0,
+      parseInteger(requestUrl.searchParams.get('offsetDays'), 0),
+    )
     const retentionStartDate = getRetentionStartDate(REPORT_ARCHIVE_DAYS)
-    const rows = await listArchiveRecordsStatement.all(retentionStartDate)
+    const [rows, countRow] = await Promise.all([
+      listArchiveRecordsPageStatement.all(retentionStartDate, limitDays, offsetDays),
+      countArchiveRecordDaysStatement.get(retentionStartDate),
+    ])
     const records = rows.map((row) => ({
       id: row.id,
       product_id: row.product_id,
@@ -227,7 +240,14 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, db }) => {
       },
     }))
 
-    json(res, 200, { records })
+    const totalDays = Number(countRow?.count || 0)
+    json(res, 200, {
+      records,
+      limitDays,
+      offsetDays,
+      totalDays,
+      hasMore: offsetDays + limitDays < totalDays,
+    })
     return true
   }
 

@@ -27,6 +27,27 @@ export const listAllShiftsStatement = db.prepare(`
   ORDER BY date DESC, start_time DESC
 `)
 
+export const listArchiveShiftsPageStatement = db.prepare(`
+  SELECT
+    id,
+    date,
+    start_time,
+    end_time,
+    employee_name,
+    status
+  FROM shifts
+  WHERE deleted_at IS NULL
+  ORDER BY date DESC, start_time DESC, id DESC
+  LIMIT ?
+  OFFSET ?
+`)
+
+export const countArchiveShiftsStatement = db.prepare(`
+  SELECT COUNT(*)::int AS count
+  FROM shifts
+  WHERE deleted_at IS NULL
+`)
+
 export const listReminderShiftsStatement = db.prepare(`
   SELECT id, date, start_time, end_time, employee_name
   FROM shifts

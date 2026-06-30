@@ -66,14 +66,19 @@ export const recordsApi = {
       method: 'PUT',
       body: JSON.stringify({ entries }),
     }),
-  archive: () => apiRequest('/api/archive/records', { method: 'GET' }),
+  archive: ({ limitDays = 3, offsetDays = 0 } = {}) =>
+    apiRequest(
+      `/api/archive/records?limitDays=${limitDays}&offsetDays=${offsetDays}`,
+      { method: 'GET' },
+    ),
   audit: ({ limit = 50, offset = 0 } = {}) =>
     apiRequest(`/api/audit?limit=${limit}&offset=${offset}`, { method: 'GET' }),
 }
 
 export const shiftsApi = {
   upcoming: () => apiRequest('/api/shifts/upcoming', { method: 'GET' }),
-  archive: () => apiRequest('/api/shifts/archive', { method: 'GET' }),
+  archive: ({ limit = 10, offset = 0 } = {}) =>
+    apiRequest(`/api/shifts/archive?limit=${limit}&offset=${offset}`, { method: 'GET' }),
   assignableUsers: () => apiRequest('/api/shifts/assignable-users', { method: 'GET' }),
   template: () => apiRequest('/api/schedule-template', { method: 'GET' }),
   updateTemplate: (shifts) =>

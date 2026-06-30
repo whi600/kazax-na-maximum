@@ -15,6 +15,11 @@ import {
   toDateKey,
 } from '../../archiveUtils'
 
+const RECORDS_PAGE_DAYS = 3
+const SHIFT_HISTORY_PAGE_SIZE = 10
+const AUDIT_PAGE_SIZE = 15
+const SHIFT_HOURS_MAX_SIZE = 500
+
 export const normalizeArchiveView = (view) => {
   if (view === 'shifts') return 'shiftHistory'
   if (view === 'hours') return 'shiftHours'
@@ -27,6 +32,7 @@ export const useArchiveData = (props) => {
   const archiveView = ref(normalizeArchiveView(props.lockedMode))
   const recordsHistory = ref({})
   const shifts = ref([])
+  const hoursShifts = ref([])
   const auditLogs = ref([])
 
   const recordsLoading = ref(false)
@@ -34,13 +40,21 @@ export const useArchiveData = (props) => {
   const auditLoading = ref(false)
   const recordsLoaded = ref(false)
   const shiftsLoaded = ref(false)
+  const hoursLoaded = ref(false)
   const auditLoaded = ref(false)
+  const recordsHasMore = ref(false)
+  const shiftsHasMore = ref(false)
+  const auditHasMore = ref(false)
+  const recordsOffsetDays = ref(0)
+  const shiftsOffset = ref(0)
+  const auditOffset = ref(0)
 
   const selectedEmployee = ref('all')
   const periodStart = ref('')
   const periodEnd = ref('')
-  const visibleRecordDays = ref(5)
   const recordsLoadMoreRef = ref(null)
+  const shiftsLoadMoreRef = ref(null)
+  const auditLoadMoreRef = ref(null)
   let recordsLoadObserver = null
 
   const safeAlert = (message) => alert(message)
@@ -121,7 +135,11 @@ export const useArchiveData = (props) => {
   )
 
   const periodShifts = computed(() =>
-    baseShifts.value.filter((shift) => {
+    hoursShifts.value
+      .filter(
+        (shift) => (shift.status || 'approved') === 'approved' && shift.employee_name,
+      )
+      .filter((shift) => {
       if (periodStart.value && shift.date < periodStart.value) return false
       if (periodEnd.value && shift.date > periodEnd.value) return false
       return true
@@ -194,44 +212,49 @@ export const useArchiveData = (props) => {
 
   const recordsDaySections = computed(() => buildRecordsDaySections(recordsHistory.value))
 
-  const visibleRecordsDaySections = computed(() =>
-    recordsDaySections.value.slice(0, visibleRecordDays.value),
-  )
+  const hasMoreRecordDays = computed(() => recordsHasMore.value)
+  const hasMoreShifts = computed(() => shiftsHasMore.value)
+  const hasMoreAudit = computed(() => auditHasMore.value)
 
-  const hasMoreRecordDays = computed(
-    () => visibleRecordsDaySections.value.length < recordsDaySections.value.length,
-  )
+  const mergeRecords = (rows) => {
+    const grouped = { ...recordsHistory.value }
 
-  const loadRecords = async () => {
-    recordsLoading.value = true
-
-    try {
-      const response = await recordsApi.archive()
-      const rows = response.records || []
-      const grouped = {}
-
-      rows.forEach((record) => {
+    rows.forEach((record) => {
         const dateKey = getRecordDateKey(record.created_at)
         if (!dateKey) return
-        if (!grouped[dateKey]) grouped[dateKey] = new Map()
+      if (!grouped[dateKey]) grouped[dateKey] = []
 
-        const existing = grouped[dateKey].get(record.product_id)
+      const byProduct = new Map(grouped[dateKey].map((item) => [item.product_id, item]))
+      const existing = byProduct.get(record.product_id)
         const existingTime = existing ? new Date(existing.created_at).getTime() : -Infinity
         const currentTime = new Date(record.created_at).getTime()
         if (!existing || currentTime >= existingTime) {
-          grouped[dateKey].set(record.product_id, record)
+        byProduct.set(record.product_id, record)
         }
+      grouped[dateKey] = Array.from(byProduct.values()).sort((a, b) =>
+        (a.products?.name || '').localeCompare(b.products?.name || '', 'ru'),
+      )
       })
 
-      const normalized = {}
-      Object.entries(grouped).forEach(([dateKey, byProduct]) => {
-        normalized[dateKey] = Array.from(byProduct.values()).sort((a, b) =>
-          (a.products?.name || '').localeCompare(b.products?.name || '', 'ru'),
-        )
-      })
+    recordsHistory.value = grouped
+  }
 
-      recordsHistory.value = normalized
-      visibleRecordDays.value = 5
+  const loadRecords = async ({ append = false } = {}) => {
+    if (recordsLoading.value) return
+    recordsLoading.value = true
+
+    try {
+      const offsetDays = append ? recordsOffsetDays.value : 0
+      const response = await recordsApi.archive({
+        limitDays: RECORDS_PAGE_DAYS,
+        offsetDays,
+      })
+      const rows = response.records || []
+
+      if (!append) recordsHistory.value = {}
+      mergeRecords(rows)
+      recordsHasMore.value = Boolean(response.hasMore)
+      recordsOffsetDays.value = offsetDays + Number(response.limitDays || RECORDS_PAGE_DAYS)
     } catch (error) {
       safeAlert(error?.message || 'Ошибка загрузки архива')
     } finally {
@@ -242,10 +265,17 @@ export const useArchiveData = (props) => {
 
   const loadMoreRecordDays = () => {
     if (!hasMoreRecordDays.value) return
-    visibleRecordDays.value = Math.min(
-      visibleRecordDays.value + 5,
-      recordsDaySections.value.length,
-    )
+    loadRecords({ append: true })
+  }
+
+  const loadMoreShifts = () => {
+    if (!hasMoreShifts.value) return
+    loadShifts({ append: true })
+  }
+
+  const loadMoreAudit = () => {
+    if (!hasMoreAudit.value) return
+    loadAudit({ append: true })
   }
 
   const reconnectRecordsObserver = async () => {
@@ -255,35 +285,57 @@ export const useArchiveData = (props) => {
 
     if (
       typeof window === 'undefined' ||
-      archiveView.value !== 'records' ||
-      !hasMoreRecordDays.value
+      (
+        (archiveView.value === 'records' && !hasMoreRecordDays.value) ||
+        (archiveView.value === 'shiftHistory' && !hasMoreShifts.value) ||
+        (archiveView.value === 'audit' && !hasMoreAudit.value) ||
+        (archiveView.value !== 'records' &&
+          archiveView.value !== 'shiftHistory' &&
+          archiveView.value !== 'audit')
+      )
     ) {
       return
     }
 
     await nextTick()
-    if (!recordsLoadMoreRef.value) return
+    const target =
+      archiveView.value === 'records'
+        ? recordsLoadMoreRef.value
+        : archiveView.value === 'shiftHistory'
+          ? shiftsLoadMoreRef.value
+          : auditLoadMoreRef.value
+    if (!target) return
 
     recordsLoadObserver = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
-          loadMoreRecordDays()
+          if (archiveView.value === 'records') loadMoreRecordDays()
+          if (archiveView.value === 'shiftHistory') loadMoreShifts()
+          if (archiveView.value === 'audit') loadMoreAudit()
         }
       },
       { root: null, rootMargin: '120px 0px', threshold: 0.1 },
     )
 
-    recordsLoadObserver.observe(recordsLoadMoreRef.value)
+    recordsLoadObserver.observe(target)
   }
 
-  const loadShifts = async () => {
+  const loadShifts = async ({ append = false } = {}) => {
+    if (shiftsLoading.value) return
     shiftsLoading.value = true
 
     try {
-      const response = await shiftsApi.archive()
-      shifts.value = (response.shifts || []).filter(
+      const offset = append ? shiftsOffset.value : 0
+      const response = await shiftsApi.archive({
+        limit: SHIFT_HISTORY_PAGE_SIZE,
+        offset,
+      })
+      const rows = (response.shifts || []).filter(
         (shift) => shift?.date && shift?.start_time && shift?.end_time,
       )
+      shifts.value = append ? [...shifts.value, ...rows] : rows
+      shiftsHasMore.value = Boolean(response.hasMore)
+      shiftsOffset.value = offset + Number(response.limit || SHIFT_HISTORY_PAGE_SIZE)
     } catch (error) {
       safeAlert(error?.message || 'Ошибка загрузки смен')
     } finally {
@@ -292,12 +344,34 @@ export const useArchiveData = (props) => {
     }
   }
 
-  const loadAudit = async () => {
+  const loadHoursShifts = async () => {
+    if (hoursLoaded.value) return
+    shiftsLoading.value = true
+
+    try {
+      const response = await shiftsApi.archive({ limit: SHIFT_HOURS_MAX_SIZE, offset: 0 })
+      hoursShifts.value = (response.shifts || []).filter(
+        (shift) => shift?.date && shift?.start_time && shift?.end_time,
+      )
+      hoursLoaded.value = true
+    } catch (error) {
+      safeAlert(error?.message || 'Ошибка загрузки смен')
+    } finally {
+      shiftsLoading.value = false
+    }
+  }
+
+  const loadAudit = async ({ append = false } = {}) => {
+    if (auditLoading.value) return
     auditLoading.value = true
 
     try {
-      const response = await recordsApi.audit({ limit: 200, offset: 0 })
-      auditLogs.value = response.logs || []
+      const offset = append ? auditOffset.value : 0
+      const response = await recordsApi.audit({ limit: AUDIT_PAGE_SIZE, offset })
+      const rows = response.logs || []
+      auditLogs.value = append ? [...auditLogs.value, ...rows] : rows
+      auditHasMore.value = Boolean(response.hasMore)
+      auditOffset.value = offset + rows.length
     } catch (error) {
       safeAlert(error?.message || 'Ошибка загрузки изменений')
     } finally {
@@ -316,8 +390,12 @@ export const useArchiveData = (props) => {
       await loadRecords()
     }
 
-    if ((view === 'shiftHistory' || view === 'shiftHours') && !shiftsLoaded.value) {
+    if (view === 'shiftHistory' && !shiftsLoaded.value) {
       await loadShifts()
+    }
+
+    if (view === 'shiftHours' && !hoursLoaded.value) {
+      await loadHoursShifts()
     }
 
     if (view === 'audit' && props.canViewAudit && !auditLoaded.value) {
@@ -337,7 +415,11 @@ export const useArchiveData = (props) => {
   )
 
   watch(recordsDaySections, reconnectRecordsObserver)
+  watch(groupedShiftHistory, reconnectRecordsObserver)
+  watch(auditLogs, reconnectRecordsObserver)
   watch(hasMoreRecordDays, reconnectRecordsObserver)
+  watch(hasMoreShifts, reconnectRecordsObserver)
+  watch(hasMoreAudit, reconnectRecordsObserver)
 
   onMounted(async () => {
     setDefaultPeriod()
@@ -366,6 +448,8 @@ export const useArchiveData = (props) => {
     periodStart,
     periodEnd,
     recordsLoadMoreRef,
+    shiftsLoadMoreRef,
+    auditLoadMoreRef,
     baseShifts,
     employees,
     groupedShiftHistory,
@@ -377,8 +461,9 @@ export const useArchiveData = (props) => {
     archiveTabs,
     archiveViewIndex,
     recordsDaySections,
-    visibleRecordsDaySections,
     hasMoreRecordDays,
+    hasMoreShifts,
+    hasMoreAudit,
     auditLogs,
     formatDateTimeLabel,
     formatAuditAction,

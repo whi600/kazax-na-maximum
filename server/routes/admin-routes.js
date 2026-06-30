@@ -36,8 +36,9 @@ export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) 
 
     const limit = Math.max(1, Math.min(100, parseInteger(requestUrl.searchParams.get('limit'), 50)))
     const offset = Math.max(0, parseInteger(requestUrl.searchParams.get('offset'), 0))
-    const rows = await listAuditLogStatement.all(limit, offset)
-    const logs = rows.map((row) => ({
+    const rows = await listAuditLogStatement.all(limit + 1, offset)
+    const pageRows = rows.slice(0, limit)
+    const logs = pageRows.map((row) => ({
       id: row.id,
       actor_user_id: row.actor_user_id,
       actor_name: row.actor_name,
@@ -50,7 +51,7 @@ export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) 
       created_at: row.created_at,
     }))
 
-    json(res, 200, { logs })
+    json(res, 200, { logs, hasMore: rows.length > limit, limit, offset })
     return true
   }
 
