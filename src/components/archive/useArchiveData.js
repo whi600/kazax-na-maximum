@@ -19,11 +19,13 @@ const RECORDS_PAGE_DAYS = 3
 const SHIFT_HISTORY_PAGE_SIZE = 10
 const AUDIT_PAGE_SIZE = 15
 const SHIFT_HOURS_MAX_SIZE = 500
+const WRITE_OFF_ANALYTICS_DAYS = 10
 
 export const normalizeArchiveView = (view) => {
   if (view === 'shifts') return 'shiftHistory'
   if (view === 'hours') return 'shiftHours'
   if (view === 'audit') return 'audit'
+  if (view === 'writeOffs') return 'writeOffs'
   if (view === 'shiftHistory' || view === 'shiftHours') return view
   return 'records'
 }
@@ -34,14 +36,20 @@ export const useArchiveData = (props) => {
   const shifts = ref([])
   const hoursShifts = ref([])
   const auditLogs = ref([])
+  const writeOffDays = ref([])
+  const writeOffDetails = ref([])
+  const selectedWriteOffDate = ref('')
 
   const recordsLoading = ref(false)
   const shiftsLoading = ref(false)
   const auditLoading = ref(false)
+  const analyticsLoading = ref(false)
+  const analyticsDetailsLoading = ref(false)
   const recordsLoaded = ref(false)
   const shiftsLoaded = ref(false)
   const hoursLoaded = ref(false)
   const auditLoaded = ref(false)
+  const analyticsLoaded = ref(false)
   const recordsHasMore = ref(false)
   const shiftsHasMore = ref(false)
   const auditHasMore = ref(false)
@@ -187,6 +195,7 @@ export const useArchiveData = (props) => {
     ]
 
     if (props.canViewAudit) {
+      tabs.push({ key: 'writeOffs', label: 'Списания' })
       tabs.push({ key: 'audit', label: 'Изменения' })
     }
 
@@ -211,6 +220,26 @@ export const useArchiveData = (props) => {
   }
 
   const recordsDaySections = computed(() => buildRecordsDaySections(recordsHistory.value))
+
+  const maxWriteOffTotal = computed(() =>
+    Math.max(...writeOffDays.value.map((day) => Number(day.totalWriteOff || 0)), 1),
+  )
+
+  const writeOffChartDays = computed(() =>
+    [...writeOffDays.value]
+      .sort((a, b) => (a.date > b.date ? 1 : -1))
+      .map((day) => ({
+        ...day,
+        heightPercent: Math.max(
+          8,
+          Math.round((Number(day.totalWriteOff || 0) / maxWriteOffTotal.value) * 100),
+        ),
+      })),
+  )
+
+  const selectedWriteOffLabel = computed(() =>
+    selectedWriteOffDate.value ? formatDateLabel(selectedWriteOffDate.value) : '',
+  )
 
   const hasMoreRecordDays = computed(() => recordsHasMore.value)
   const hasMoreShifts = computed(() => shiftsHasMore.value)
@@ -380,8 +409,43 @@ export const useArchiveData = (props) => {
     }
   }
 
+  const loadWriteOffDetails = async (date) => {
+    if (!date) return
+    selectedWriteOffDate.value = date
+    analyticsDetailsLoading.value = true
+
+    try {
+      const response = await recordsApi.writeOffDetails(date)
+      writeOffDetails.value = response.items || []
+    } catch (error) {
+      safeAlert(error?.message || 'Ошибка загрузки списаний')
+    } finally {
+      analyticsDetailsLoading.value = false
+    }
+  }
+
+  const loadWriteOffAnalytics = async () => {
+    if (analyticsLoading.value) return
+    analyticsLoading.value = true
+
+    try {
+      const response = await recordsApi.writeOffAnalytics({
+        limitDays: WRITE_OFF_ANALYTICS_DAYS,
+      })
+      writeOffDays.value = response.days || []
+      analyticsLoaded.value = true
+
+      const firstDate = writeOffDays.value[0]?.date || ''
+      if (firstDate) await loadWriteOffDetails(firstDate)
+    } catch (error) {
+      safeAlert(error?.message || 'Ошибка загрузки аналитики')
+    } finally {
+      analyticsLoading.value = false
+    }
+  }
+
   watch(archiveView, async (view) => {
-    if (view === 'audit' && !props.canViewAudit) {
+    if ((view === 'audit' || view === 'writeOffs') && !props.canViewAudit) {
       archiveView.value = 'records'
       return
     }
@@ -402,13 +466,17 @@ export const useArchiveData = (props) => {
       await loadAudit()
     }
 
+    if (view === 'writeOffs' && props.canViewAudit && !analyticsLoaded.value) {
+      await loadWriteOffAnalytics()
+    }
+
     await reconnectRecordsObserver()
   })
 
   watch(
     () => props.canViewAudit,
     (canViewAudit) => {
-      if (!canViewAudit && archiveView.value === 'audit') {
+      if (!canViewAudit && (archiveView.value === 'audit' || archiveView.value === 'writeOffs')) {
         archiveView.value = 'records'
       }
     },
@@ -444,6 +512,8 @@ export const useArchiveData = (props) => {
     recordsLoading,
     shiftsLoading,
     auditLoading,
+    analyticsLoading,
+    analyticsDetailsLoading,
     selectedEmployee,
     periodStart,
     periodEnd,
@@ -465,6 +535,11 @@ export const useArchiveData = (props) => {
     hasMoreShifts,
     hasMoreAudit,
     auditLogs,
+    writeOffChartDays,
+    writeOffDetails,
+    selectedWriteOffDate,
+    selectedWriteOffLabel,
+    loadWriteOffDetails,
     formatDateTimeLabel,
     formatAuditAction,
     formatAuditEntity,

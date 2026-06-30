@@ -66,13 +66,25 @@ export const recordsApi = {
       method: 'PUT',
       body: JSON.stringify({ entries }),
     }),
+  completeToday: () =>
+    apiRequest('/api/daily-records/today/complete', { method: 'POST' }),
   archive: ({ limitDays = 3, offsetDays = 0 } = {}) =>
     apiRequest(
       `/api/archive/records?limitDays=${limitDays}&offsetDays=${offsetDays}`,
       { method: 'GET' },
     ),
+  writeOffAnalytics: ({ limitDays = 10 } = {}) =>
+    apiRequest(`/api/analytics/write-offs?limitDays=${limitDays}`, { method: 'GET' }),
+  writeOffDetails: (date) =>
+    apiRequest(`/api/analytics/write-offs?date=${encodeURIComponent(date)}`, {
+      method: 'GET',
+    }),
   audit: ({ limit = 50, offset = 0 } = {}) =>
     apiRequest(`/api/audit?limit=${limit}&offset=${offset}`, { method: 'GET' }),
+}
+
+export const employeesApi = {
+  summary: (id) => apiRequest(`/api/employees/${id}/summary`, { method: 'GET' }),
 }
 
 export const shiftsApi = {

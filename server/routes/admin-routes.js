@@ -11,6 +11,7 @@ import { isEditableResource, logAudit, parseAuditJson, touchResource } from '../
 import { badRequest, forbidden, json, notFound, readJsonBody } from '../http.js'
 import {
   getResourceStateStatement,
+  listEmployeeProfileShiftsStatement,
   getUserByIdStatement,
   listAuditLogStatement,
   listEditingPresenceStatement,
@@ -28,6 +29,11 @@ const canEditResource = (resource, permissions) =>
     (resource === 'schedule' && !permissions.scheduleManage) ||
     (resource === 'assortment' && !permissions.productsManage)
   )
+
+const parseEmployeeSummaryId = (pathname) => {
+  const match = pathname.match(/^\/api\/employees\/(\d+)\/summary$/)
+  return match ? Number(match[1]) : null
+}
 
 export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) => {
   if (pathname === '/api/audit' && req.method === 'GET') {
@@ -168,6 +174,40 @@ export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) 
     }))
 
     json(res, 200, { users })
+    return true
+  }
+
+  const employeeSummaryId = parseEmployeeSummaryId(pathname)
+  if (employeeSummaryId && req.method === 'GET') {
+    const access = await requirePermission(req, res, 'scheduleManage')
+    if (!access) return true
+
+    const employee = await getUserByIdStatement.get(employeeSummaryId)
+    if (!employee) {
+      notFound(res, 'Пользователь не найден')
+      return true
+    }
+
+    const rows = await listEmployeeProfileShiftsStatement.all(employee.name, 20)
+    const today = new Date().toISOString().slice(0, 10)
+    const upcoming = rows
+      .filter((shift) => shift.date >= today)
+      .sort((a, b) => `${a.date}T${a.start_time}`.localeCompare(`${b.date}T${b.start_time}`))
+      .slice(0, 5)
+    const recent = rows.filter((shift) => shift.date < today).slice(0, 8)
+
+    json(res, 200, {
+      employee: {
+        id: employee.id,
+        email: employee.email,
+        name: employee.name,
+        role: employee.role,
+        created_at: employee.created_at,
+        shiftsTotal: rows.length,
+      },
+      upcoming,
+      recent,
+    })
     return true
   }
 

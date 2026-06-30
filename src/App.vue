@@ -51,6 +51,10 @@ const {
   products,
   dailyEntries,
   reportCanEditToday,
+  reportCompleted,
+  reportCompletedAt,
+  reportCompletedByName,
+  reportCompleting,
   reportSaveLabel,
   reportSaveClass,
   productSaveBusy,
@@ -62,6 +66,7 @@ const {
   onAddProduct,
   removeReportEntry,
   saveReport,
+  completeReport,
   scheduleReportAutosave,
   startEditProduct,
   saveProduct,
@@ -275,6 +280,9 @@ watch([profileView, canManageProducts, canManageRoles, canManageSchedule], ([vie
   if (view === 'schedule-template' && !canManageSchedule.value) {
     profileView.value = 'main'
   }
+  if (view === 'employees' && !canManageSchedule.value) {
+    profileView.value = 'main'
+  }
 })
 
 watch(
@@ -360,6 +368,7 @@ onBeforeUnmount(() => {
           @open-assortment="profileView = 'assortment'"
           @open-notifications="profileView = 'notifications'"
           @open-schedule-template="profileView = 'schedule-template'"
+          @open-employees="profileView = 'employees'"
           @open-roles="profileView = 'roles'"
           @logout="logout"
           @back-main="profileView = 'main'; resetProductForm()"
@@ -400,8 +409,13 @@ onBeforeUnmount(() => {
             :products="products"
             :daily-entries="dailyEntries"
             :editable="reportCanEditToday && !isChef"
+            :report-completed="reportCompleted"
+            :report-completed-at="reportCompletedAt"
+            :report-completed-by-name="reportCompletedByName"
+            :report-completing="reportCompleting"
             @add-product="onAddProduct"
             @remove-entry="removeReportEntry"
+            @complete-report="completeReport"
           />
         </div>
       </main>

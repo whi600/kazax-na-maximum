@@ -3,15 +3,20 @@ import { logAudit, touchResource } from '../audit.js'
 import { badRequest, forbidden, json, notFound, readJsonBody } from '../http.js'
 import {
   deleteProductStatement,
+  deleteDailyReportStatusStatement,
   deleteTodayRecordsStatement,
   countArchiveRecordDaysStatement,
+  getDailyReportStatusStatement,
   getApprovedShiftForUserDateStatement,
   getProductByIdStatement,
   insertDailyRecordStatement,
   insertProductStatement,
   listArchiveRecordsPageStatement,
+  listWriteOffDetailsByDateStatement,
+  listWriteOffTotalsStatement,
   listProductsStatement,
   listTodayRecordsStatement,
+  upsertDailyReportStatusStatement,
   updateProductStatement,
 } from '../statements.js'
 import {
@@ -23,6 +28,12 @@ import {
 } from '../api-utils.js'
 
 const REPORT_ARCHIVE_DAYS = 10
+
+const mapReportStatus = (row) => ({
+  completed: Boolean(row?.completed_at),
+  completedAt: row?.completed_at || null,
+  completedByName: row?.completed_by_name || null,
+})
 
 const canEditDailyReport = async (user, date) => {
   if (user?.role === 'admin') return true
@@ -155,6 +166,34 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, requestUrl
     json(res, 200, {
       entries,
       canEdit: await canEditDailyReport(user, today),
+      reportStatus: mapReportStatus(await getDailyReportStatusStatement.get(today)),
+    })
+    return true
+  }
+
+  if (pathname === '/api/daily-records/today/complete' && req.method === 'POST') {
+    const user = await requireUser(req, res)
+    if (!user) return true
+
+    const today = getToday()
+    if (!(await canEditDailyReport(user, today))) {
+      forbidden(res, 'Отметить отчет готовым может только админ или сотрудник со сменой сегодня')
+      return true
+    }
+
+    await upsertDailyReportStatusStatement.run(today, user.id)
+    await touchResource('report', user)
+    await logAudit({
+      actorUser: user,
+      entityType: 'daily_report',
+      entityId: today,
+      action: 'daily_report.complete',
+      after: { record_date: today, completed_by_user_id: user.id },
+    })
+
+    json(res, 200, {
+      ok: true,
+      reportStatus: mapReportStatus(await getDailyReportStatusStatement.get(today)),
     })
     return true
   }
@@ -174,6 +213,7 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, requestUrl
 
     await db.transaction(async (client) => {
       await deleteTodayRecordsStatement.runOn(client, today)
+      await deleteDailyReportStatusStatement.runOn(client, today)
 
       for (const item of entries) {
         const productId = Number(item.product_id)
@@ -207,6 +247,47 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, requestUrl
     })
 
     json(res, 200, { ok: true })
+    return true
+  }
+
+  if (pathname === '/api/analytics/write-offs' && req.method === 'GET') {
+    const user = await requireUser(req, res)
+    if (!user) return true
+
+    const detailDate = String(requestUrl.searchParams.get('date') || '').trim()
+    if (detailDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(detailDate)) {
+        badRequest(res, 'Некорректная дата')
+        return true
+      }
+
+      const rows = await listWriteOffDetailsByDateStatement.all(detailDate)
+      json(res, 200, {
+        date: detailDate,
+        items: rows.map((row) => ({
+          id: row.id,
+          product_id: row.product_id,
+          product_name: row.product_name,
+          product_category: row.product_category,
+          product_unit: row.product_unit,
+          write_off: row.write_off,
+        })),
+      })
+      return true
+    }
+
+    const limitDays = Math.max(
+      1,
+      Math.min(30, parseInteger(requestUrl.searchParams.get('limitDays'), REPORT_ARCHIVE_DAYS)),
+    )
+    const retentionStartDate = getRetentionStartDate(limitDays)
+    const days = (await listWriteOffTotalsStatement.all(retentionStartDate)).map((row) => ({
+      date: row.record_date,
+      totalWriteOff: Number(row.total_write_off || 0),
+      itemsCount: Number(row.items_count || 0),
+    }))
+
+    json(res, 200, { days, limitDays })
     return true
   }
 

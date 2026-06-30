@@ -5,6 +5,10 @@ export const useReportState = ({ canManageProducts }) => {
   const products = ref([])
   const dailyEntries = ref([])
   const reportCanEditToday = ref(false)
+  const reportCompleted = ref(false)
+  const reportCompletedAt = ref(null)
+  const reportCompletedByName = ref('')
+  const reportCompleting = ref(false)
   const reportSaveStatus = ref('idle')
   const productSaveBusy = ref(false)
   const editingProductId = ref(null)
@@ -33,6 +37,9 @@ export const useReportState = ({ canManageProducts }) => {
   const loadReportData = async () => {
     const [, todayResponse] = await Promise.all([loadProducts(), recordsApi.today()])
     reportCanEditToday.value = Boolean(todayResponse.canEdit)
+    reportCompleted.value = Boolean(todayResponse.reportStatus?.completed)
+    reportCompletedAt.value = todayResponse.reportStatus?.completedAt || null
+    reportCompletedByName.value = todayResponse.reportStatus?.completedByName || ''
     dailyEntries.value = (todayResponse.entries || []).map((entry) => ({
       product_id: entry.product_id,
       name: entry.name,
@@ -115,7 +122,7 @@ export const useReportState = ({ canManageProducts }) => {
   })
 
   const saveReport = async ({ silent = false, autosave = false } = {}) => {
-    if (!reportCanEditToday.value) return
+    if (!reportCanEditToday.value) return false
 
     if (autosave) {
       setReportSaveStatus('saving')
@@ -123,15 +130,40 @@ export const useReportState = ({ canManageProducts }) => {
 
     try {
       await recordsApi.saveToday(buildReportPayload())
+      reportCompleted.value = false
+      reportCompletedAt.value = null
+      reportCompletedByName.value = ''
       if (autosave) {
         setReportSaveStatus('saved')
       }
       if (!silent) alert('✅ Сохранено')
+      return true
     } catch (error) {
       if (autosave) setReportSaveStatus('error')
       if (!silent) {
         alert('Ошибка: ' + (error?.message || 'Не удалось сохранить отчет'))
       }
+      return false
+    }
+  }
+
+  const completeReport = async () => {
+    if (!reportCanEditToday.value || reportCompleting.value) return
+
+    reportCompleting.value = true
+    try {
+      const saved = await saveReport({ silent: true, autosave: true })
+      if (!saved) return
+      const response = await recordsApi.completeToday()
+      reportCompleted.value = Boolean(response.reportStatus?.completed)
+      reportCompletedAt.value = response.reportStatus?.completedAt || null
+      reportCompletedByName.value = response.reportStatus?.completedByName || ''
+      setReportSaveStatus('saved')
+    } catch (error) {
+      setReportSaveStatus('error')
+      alert(error?.message || 'Не удалось отметить отчет готовым')
+    } finally {
+      reportCompleting.value = false
     }
   }
 
@@ -212,6 +244,9 @@ export const useReportState = ({ canManageProducts }) => {
     products.value = []
     dailyEntries.value = []
     reportCanEditToday.value = false
+    reportCompleted.value = false
+    reportCompletedAt.value = null
+    reportCompletedByName.value = ''
     setReportSaveStatus('idle')
     resetProductForm()
   }
@@ -225,6 +260,10 @@ export const useReportState = ({ canManageProducts }) => {
     products,
     dailyEntries,
     reportCanEditToday,
+    reportCompleted,
+    reportCompletedAt,
+    reportCompletedByName,
+    reportCompleting,
     reportSaveLabel,
     reportSaveClass,
     productSaveBusy,
@@ -236,6 +275,7 @@ export const useReportState = ({ canManageProducts }) => {
     onAddProduct,
     removeReportEntry,
     saveReport,
+    completeReport,
     scheduleReportAutosave,
     startEditProduct,
     saveProduct,

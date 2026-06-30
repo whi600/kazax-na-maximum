@@ -78,9 +78,11 @@ const {
   unsavedNewShifts,
   recentNewShiftIds,
   dismissedNewShiftIds,
+  showMineOnly,
   approvedShifts,
   weekStarts,
   selectedWeekDays,
+  visibleSelectedWeekDays,
   selectedWeekStats,
   pendingRequests,
   makeTempShift,
@@ -528,14 +530,16 @@ onBeforeUnmount(() => {
           :selected-week-stats="selectedWeekStats"
           :can-manage-schedule="canManageSchedule"
           :add-disabled="isWeekAddBlocked"
+          :show-mine-only="showMineOnly"
           @select-week="onWeekTabClick"
           @hold-week="startWeekHold"
           @cancel-hold="cancelWeekHold"
           @add-week="addNextWeekTemplate"
+          @toggle-mine="showMineOnly = !showMineOnly"
         />
 
         <ScheduleDaysList
-          :days="selectedWeekDays"
+          :days="visibleSelectedWeekDays"
           :approved-count="approvedShifts.length"
           :can-manage-schedule="canManageSchedule"
           :can-self-cancel="canSelfCancelBooking"

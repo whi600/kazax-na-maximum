@@ -24,6 +24,9 @@ export const useAppNavigation = ({
     if (activeTab.value === 'profile' && profileView.value === 'schedule-template') {
       return 'Базовое расписание'
     }
+    if (activeTab.value === 'profile' && profileView.value === 'employees') {
+      return 'Сотрудники'
+    }
     if (activeTab.value === 'profile') return 'Профиль'
     return 'Отчет'
   })

@@ -58,6 +58,25 @@ export const listReminderShiftsStatement = db.prepare(`
   ORDER BY date ASC, start_time ASC
 `)
 
+export const listReportReminderShiftsStatement = db.prepare(`
+  SELECT id, date, start_time, end_time, employee_name
+  FROM shifts
+  WHERE status = 'approved'
+    AND date >= ?
+    AND deleted_at IS NULL
+  ORDER BY date ASC, end_time ASC, start_time ASC
+`)
+
+export const listEmployeeProfileShiftsStatement = db.prepare(`
+  SELECT id, date, start_time, end_time, employee_name, status
+  FROM shifts
+  WHERE deleted_at IS NULL
+    AND status = 'approved'
+    AND LOWER(TRIM(employee_name)) = LOWER(TRIM(?))
+  ORDER BY date DESC, start_time DESC, id DESC
+  LIMIT ?
+`)
+
 export const getShiftByIdStatement = db.prepare(
   'SELECT id, date, start_time, end_time, employee_name, status, created_by FROM shifts WHERE id = ? AND deleted_at IS NULL',
 )

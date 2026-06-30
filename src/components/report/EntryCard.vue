@@ -6,7 +6,23 @@ const props = defineProps({
 });
 const emit = defineEmits(['remove']);
 
-const handleEnter = (e) => { e.target.blur(); };
+const handleEnter = (event) => {
+  const inputs = Array.from(document.querySelectorAll('.report-entry-input:not(:disabled)'))
+  const currentIndex = inputs.indexOf(event.target)
+  const nextInput = inputs[currentIndex + 1]
+
+  if (nextInput) {
+    nextInput.focus()
+    nextInput.select?.()
+    return
+  }
+
+  event.target.blur()
+}
+
+const selectInputValue = (event) => {
+  event.target.select?.()
+}
 </script>
 
 <template>
@@ -22,9 +38,10 @@ const handleEnter = (e) => { e.target.blur(); };
           v-model.number="item[field]" 
           :disabled="!editable"
           @keydown.enter="handleEnter"
+          @focus="selectInputValue"
           inputmode="numeric"
           :placeholder="field === 'arrival' ? 'Приход' : field === 'remainder' ? 'Ост' : 'Спис'"
-          class="w-12 bg-slate-50 border border-slate-100 rounded-lg py-1.5 text-center font-black text-[11px] outline-none transition-all placeholder:font-bold placeholder:text-slate-300"
+          class="report-entry-input w-12 bg-slate-50 border border-slate-100 rounded-lg py-1.5 text-center font-black text-[11px] outline-none transition-all placeholder:font-bold placeholder:text-slate-300"
           :class="{
             'text-blue-600 border-blue-200 bg-blue-50/40': field === 'arrival' && item[field] > 0,
             'text-blue-600 border-blue-200 bg-blue-50/40': field === 'remainder' && item[field] > 0,

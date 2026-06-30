@@ -1,5 +1,5 @@
 <script setup>
-import { Calendar, Clock, User } from 'lucide-vue-next'
+import { BarChart3, Calendar, Clock, PackageSearch, User } from 'lucide-vue-next'
 import NativeDateButton from '../shared/NativeDateButton.vue'
 import { useArchiveData } from './useArchiveData'
 
@@ -14,6 +14,8 @@ const {
   recordsLoading,
   shiftsLoading,
   auditLoading,
+  analyticsLoading,
+  analyticsDetailsLoading,
   selectedEmployee,
   periodStart,
   periodEnd,
@@ -35,6 +37,11 @@ const {
   shiftsLoadMoreRef,
   auditLoadMoreRef,
   auditLogs,
+  writeOffChartDays,
+  writeOffDetails,
+  selectedWriteOffDate,
+  selectedWriteOffLabel,
+  loadWriteOffDetails,
   formatDateTimeLabel,
   formatAuditAction,
   formatAuditEntity,
@@ -140,6 +147,84 @@ const {
       >
         Загружаем еще...
       </div>
+    </div>
+
+    <div v-else-if="archiveView === 'writeOffs'" class="space-y-3">
+      <div v-if="analyticsLoading" class="text-center py-10 font-bold text-slate-400 text-xs uppercase animate-pulse">
+        Загрузка списаний...
+      </div>
+
+      <div
+        v-else-if="writeOffChartDays.length === 0"
+        class="text-center py-10 text-slate-400 text-xs font-bold uppercase"
+      >
+        Списаний пока нет
+      </div>
+
+      <template v-else>
+        <section class="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div class="mb-4 flex items-center gap-2">
+            <BarChart3 class="h-5 w-5 text-blue-600" />
+            <div>
+              <p class="text-xs font-black uppercase text-slate-700">Списания по дням</p>
+              <p class="text-[10px] font-bold text-slate-400">Нажмите на день, чтобы увидеть позиции</p>
+            </div>
+          </div>
+
+          <div class="flex h-44 items-end gap-2 overflow-x-auto pb-1">
+            <button
+              v-for="day in writeOffChartDays"
+              :key="day.date"
+              type="button"
+              @click="loadWriteOffDetails(day.date)"
+              class="flex min-w-12 flex-1 flex-col items-center justify-end gap-2 rounded-lg px-1 py-1 transition-all active:scale-95"
+              :class="selectedWriteOffDate === day.date ? 'bg-blue-50' : 'bg-slate-50'"
+            >
+              <span class="text-[10px] font-black text-slate-500">
+                {{ day.totalWriteOff }}
+              </span>
+              <span
+                class="w-full max-w-8 rounded-t-lg transition-all duration-300"
+                :class="selectedWriteOffDate === day.date ? 'bg-blue-600' : 'bg-slate-300'"
+                :style="{ height: `${day.heightPercent}%` }"
+              />
+              <span class="text-[9px] font-black uppercase text-slate-400">
+                {{ formatShiftDay(day.date) }}
+              </span>
+            </button>
+          </div>
+        </section>
+
+        <section class="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div class="mb-3 flex items-center gap-2">
+            <PackageSearch class="h-5 w-5 text-blue-600" />
+            <div>
+              <p class="text-xs font-black uppercase text-slate-700">
+                {{ selectedWriteOffLabel || 'Детализация' }}
+              </p>
+              <p class="text-[10px] font-bold text-slate-400">Все списанные позиции за день</p>
+            </div>
+          </div>
+
+          <div v-if="analyticsDetailsLoading" class="py-6 text-center text-xs font-bold uppercase text-slate-300">
+            Загружаем...
+          </div>
+
+          <div v-else class="space-y-2">
+            <div
+              v-for="item in writeOffDetails"
+              :key="item.id"
+              class="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+            >
+              <div class="min-w-0">
+                <p class="truncate text-sm font-black text-slate-800">{{ item.product_name }}</p>
+                <p class="text-[10px] font-bold uppercase text-slate-400">{{ item.product_unit }}</p>
+              </div>
+              <p class="shrink-0 text-base font-black text-red-500">{{ item.write_off }}</p>
+            </div>
+          </div>
+        </section>
+      </template>
     </div>
 
     <div v-else>

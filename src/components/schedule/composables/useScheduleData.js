@@ -24,6 +24,7 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
   const unbookRequests = ref([])
   const recentNewShiftIds = ref([])
   const dismissedNewShiftIds = ref([])
+  const showMineOnly = ref(false)
   let tempShiftSeq = 0
 
   const hasBootstrappedDefaultWeeks = () => {
@@ -201,6 +202,21 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
     })
   })
 
+  const visibleSelectedWeekDays = computed(() => {
+    if (!showMineOnly.value) return selectedWeekDays.value
+
+    return selectedWeekDays.value.map((day) => {
+      const shiftsForUser = day.shifts.filter((shift) => isCurrentUserShift(shift))
+      const occupiedCount = shiftsForUser.filter((shift) => shift.employee_name).length
+      return {
+        ...day,
+        shifts: shiftsForUser,
+        occupiedCount,
+        openCount: shiftsForUser.length - occupiedCount,
+      }
+    })
+  })
+
   const selectedWeekStats = computed(() => {
     const shiftsCount = selectedWeekDays.value.reduce(
       (sum, day) => sum + day.shifts.length,
@@ -244,9 +260,11 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
     unbookRequests,
     recentNewShiftIds,
     dismissedNewShiftIds,
+    showMineOnly,
     approvedShifts,
     weekStarts,
     selectedWeekDays,
+    visibleSelectedWeekDays,
     selectedWeekStats,
     pendingRequests,
     makeTempShift,

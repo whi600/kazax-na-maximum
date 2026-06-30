@@ -426,6 +426,20 @@ const migrations = [
         ON shift_unbook_requests(status, created_at DESC);
     `,
   },
+  {
+    name: '015_daily_report_status',
+    sql: `
+      CREATE TABLE IF NOT EXISTS daily_report_status (
+        record_date TEXT PRIMARY KEY,
+        completed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_daily_report_status_completed_at
+        ON daily_report_status(completed_at DESC);
+    `,
+  },
 ]
 
 const appliedMigrationRows = await db.prepare('SELECT name FROM migrations').all()

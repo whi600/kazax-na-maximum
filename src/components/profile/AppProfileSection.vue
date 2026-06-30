@@ -1,5 +1,6 @@
 <script setup>
 import AssortmentEditorView from './AssortmentEditorView.vue'
+import EmployeeProfilesView from './EmployeeProfilesView.vue'
 import NotificationSettingsView from './NotificationSettingsView.vue'
 import ProfileHomeView from './ProfileHomeView.vue'
 import RoleSettingsView from './RoleSettingsView.vue'
@@ -35,6 +36,7 @@ const emit = defineEmits([
   'open-assortment',
   'open-notifications',
   'open-schedule-template',
+  'open-employees',
   'open-roles',
   'logout',
   'back-main',
@@ -64,6 +66,7 @@ const emit = defineEmits([
       @open-assortment="emit('open-assortment')"
       @open-notifications="emit('open-notifications')"
       @open-schedule-template="emit('open-schedule-template')"
+      @open-employees="emit('open-employees')"
       @open-roles="emit('open-roles')"
       @logout="emit('logout')"
     />
@@ -91,6 +94,11 @@ const emit = defineEmits([
 
     <ScheduleTemplateEditorView
       v-else-if="profileView === 'schedule-template'"
+      @back="emit('back-main')"
+    />
+
+    <EmployeeProfilesView
+      v-else-if="profileView === 'employees'"
       @back="emit('back-main')"
     />
 

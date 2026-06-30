@@ -42,6 +42,13 @@ export const listNotificationTargetUsersStatement = db.prepare(`
   ORDER BY id ASC
 `)
 
+export const listAdminUsersStatement = db.prepare(`
+  SELECT id, email, name, role, created_at
+  FROM users
+  WHERE role = 'admin'
+  ORDER BY id ASC
+`)
+
 export const listEmployeeUsersStatement = db.prepare(`
   SELECT id, email, name, role, created_at
   FROM users

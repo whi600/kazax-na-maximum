@@ -8,9 +8,10 @@ defineProps({
   selectedWeekStats: { type: Object, required: true },
   canManageSchedule: { type: Boolean, default: false },
   addDisabled: { type: Boolean, default: false },
+  showMineOnly: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['select-week', 'hold-week', 'cancel-hold', 'add-week'])
+const emit = defineEmits(['select-week', 'hold-week', 'cancel-hold', 'add-week', 'toggle-mine'])
 
 const handleWeekPointerDown = (event, weekStart) => {
   event.preventDefault()
@@ -74,5 +75,27 @@ const handleWeekClick = (event, weekStart) => {
         <p class="text-xl font-black text-blue-600">{{ selectedWeekStats.myCount }}</p>
       </div>
     </div>
+
+    <button
+      type="button"
+      @click="emit('toggle-mine')"
+      class="mb-4 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all active:scale-[0.99]"
+      :class="
+        showMineOnly
+          ? 'border-blue-200 bg-blue-50 text-blue-600'
+          : 'border-slate-100 bg-white text-slate-400'
+      "
+    >
+      <span class="text-[10px] font-black uppercase">Показывать только мои смены</span>
+      <span
+        class="h-5 w-9 rounded-full p-0.5 transition-colors"
+        :class="showMineOnly ? 'bg-blue-600' : 'bg-slate-200'"
+      >
+        <span
+          class="block h-4 w-4 rounded-full bg-white transition-transform"
+          :class="showMineOnly ? 'translate-x-4' : 'translate-x-0'"
+        />
+      </span>
+    </button>
   </div>
 </template>

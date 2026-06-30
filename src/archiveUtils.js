@@ -108,12 +108,14 @@ export const auditActionLabels = {
   'shift.update': 'Смена изменена',
   'shift.delete': 'Смена удалена',
   'user.role_update': 'Роль пользователя изменена',
+  'daily_report.complete': 'Отчет отмечен готовым',
 }
 
 export const auditEntityLabels = {
   product: 'Ассортимент',
   shift: 'График',
   user: 'Пользователи',
+  daily_report: 'Отчет',
 }
 
 export const formatAuditAction = (action) => auditActionLabels[action] || action

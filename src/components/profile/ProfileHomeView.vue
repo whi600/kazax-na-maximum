@@ -7,6 +7,7 @@ import {
   Pencil,
   ShieldCheck,
   SlidersHorizontal,
+  UsersRound,
   UserRound,
 } from 'lucide-vue-next'
 import { notificationsApi } from '../../api'
@@ -24,6 +25,7 @@ const emit = defineEmits([
   'open-assortment',
   'open-notifications',
   'open-schedule-template',
+  'open-employees',
   'open-roles',
   'logout',
 ])
@@ -104,6 +106,16 @@ const sendBroadcast = async () => {
       >
         <Pencil class="w-4 h-4" />
         Ассортимент
+      </button>
+
+      <button
+        v-if="canManageSchedule"
+        type="button"
+        @click="emit('open-employees')"
+        class="w-full bg-slate-50 text-slate-700 py-3 rounded-lg text-[11px] font-black uppercase flex items-center justify-center gap-2 active:scale-95 transition-all border border-slate-100"
+      >
+        <UsersRound class="w-4 h-4" />
+        Сотрудники
       </button>
 
       <button
