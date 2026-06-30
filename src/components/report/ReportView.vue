@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { ChefHat, ChevronDown, CheckCircle2, LayoutGrid, ShoppingBasket } from 'lucide-vue-next'
+import { ChefHat, ChevronDown, LayoutGrid, ShoppingBasket } from 'lucide-vue-next'
 import EntryCard from './EntryCard.vue'
 import ProductSelector from './ProductSelector.vue'
 
@@ -8,13 +8,9 @@ const props = defineProps({
   products: { type: Array, default: () => [] },
   dailyEntries: { type: Array, default: () => [] },
   editable: { type: Boolean, default: true },
-  reportCompleted: { type: Boolean, default: false },
-  reportCompletedAt: { type: String, default: '' },
-  reportCompletedByName: { type: String, default: '' },
-  reportCompleting: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['add-product', 'remove-entry', 'complete-report'])
+const emit = defineEmits(['add-product', 'remove-entry'])
 
 const categories = [
   { key: 'bakery', label: 'Выпечка', icon: ShoppingBasket },
@@ -47,11 +43,6 @@ const toggleGroup = (key) => {
   }
 }
 
-const reportStatusText = computed(() => {
-  if (!props.reportCompleted) return 'Черновик'
-  if (props.reportCompletedByName) return `Готов • ${props.reportCompletedByName}`
-  return 'Готов'
-})
 </script>
 
 <template>
@@ -63,37 +54,6 @@ const reportStatusText = computed(() => {
         :disabled="!editable"
         @add="emit('add-product', $event)"
       />
-
-      <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2 shadow-sm">
-        <div class="min-w-0">
-          <p class="text-[9px] font-black uppercase tracking-widest text-slate-300">
-            Статус отчета
-          </p>
-          <p
-            class="text-xs font-black"
-            :class="reportCompleted ? 'text-emerald-600' : 'text-slate-500'"
-          >
-            {{ reportStatusText }}
-          </p>
-        </div>
-        <button
-          v-if="editable"
-          type="button"
-          :disabled="reportCompleting"
-          @click="emit('complete-report')"
-          class="shrink-0 rounded-lg px-3 py-2 text-[10px] font-black uppercase transition-all active:scale-95 disabled:opacity-50"
-          :class="
-            reportCompleted
-              ? 'bg-emerald-50 text-emerald-600 border border-emerald-100'
-              : 'bg-blue-600 text-white shadow-sm shadow-blue-100'
-          "
-        >
-          <span class="inline-flex items-center gap-1.5">
-            <CheckCircle2 class="h-3.5 w-3.5" />
-            {{ reportCompleting ? 'Сохраняем...' : reportCompleted ? 'Готов' : 'Отчет готов' }}
-          </span>
-        </button>
-      </div>
 
       <div v-for="category in categories" :key="category.key" class="space-y-1">
         <button

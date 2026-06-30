@@ -211,6 +211,12 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, requestUrl
       return true
     }
 
+    const currentStatus = await getDailyReportStatusStatement.get(today)
+    if (currentStatus?.completed_at && user.role !== 'admin') {
+      forbidden(res, 'Отчет уже отмечен готовым. Изменить его может только админ')
+      return true
+    }
+
     await db.transaction(async (client) => {
       await deleteTodayRecordsStatement.runOn(client, today)
       await deleteDailyReportStatusStatement.runOn(client, today)

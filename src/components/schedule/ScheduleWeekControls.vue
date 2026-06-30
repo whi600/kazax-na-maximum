@@ -26,38 +26,53 @@ const handleWeekClick = (event, weekStart) => {
 
 <template>
   <div class="mb-4 schedule-fade">
-    <div class="flex gap-2 overflow-x-auto pb-1 mb-3">
+    <div class="flex items-start gap-2 mb-3">
+      <div class="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
+        <button
+          v-for="weekStart in weekStarts"
+          :key="weekStart"
+          @click="handleWeekClick($event, weekStart)"
+          @pointerdown="handleWeekPointerDown($event, weekStart)"
+          @pointerup="emit('cancel-hold')"
+          @pointerleave="emit('cancel-hold')"
+          @pointercancel="emit('cancel-hold')"
+          @contextmenu.prevent
+          class="shrink-0 select-none rounded-lg px-3 py-2 border text-left transition-all"
+          style="-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation;"
+          :class="
+            weekStart === selectedWeekStart
+              ? 'bg-slate-900 text-white border-slate-900'
+              : 'bg-white text-slate-400 border-slate-100'
+          "
+          type="button"
+        >
+          <span class="block text-[10px] font-black uppercase">Неделя</span>
+          <span class="block text-xs font-black">{{ formatWeekRange(weekStart) }}</span>
+        </button>
+        <button
+          v-if="canManageSchedule"
+          @click="emit('add-week')"
+          :disabled="addDisabled"
+          class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all bg-white text-slate-400 border-slate-100 flex items-center justify-center min-w-[86px]"
+          :class="addDisabled ? 'opacity-40 pointer-events-none' : ''"
+          type="button"
+          aria-label="Добавить неделю"
+        >
+          <Plus class="w-5 h-5" />
+        </button>
+      </div>
+
       <button
-        v-for="weekStart in weekStarts"
-        :key="weekStart"
-        @click="handleWeekClick($event, weekStart)"
-        @pointerdown="handleWeekPointerDown($event, weekStart)"
-        @pointerup="emit('cancel-hold')"
-        @pointerleave="emit('cancel-hold')"
-        @pointercancel="emit('cancel-hold')"
-        @contextmenu.prevent
-        class="shrink-0 select-none rounded-lg px-3 py-2 border text-left transition-all"
-        style="-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation;"
+        type="button"
+        @click="emit('toggle-mine')"
+        class="shrink-0 rounded-lg border px-3 py-2 text-[10px] font-black uppercase transition-all active:scale-95"
         :class="
-          weekStart === selectedWeekStart
-            ? 'bg-slate-900 text-white border-slate-900'
-            : 'bg-white text-slate-400 border-slate-100'
+          showMineOnly
+            ? 'border-blue-600 bg-blue-600 text-white'
+            : 'border-slate-100 bg-white text-slate-400'
         "
-        type="button"
       >
-        <span class="block text-[10px] font-black uppercase">Неделя</span>
-        <span class="block text-xs font-black">{{ formatWeekRange(weekStart) }}</span>
-      </button>
-      <button
-        v-if="canManageSchedule"
-        @click="emit('add-week')"
-        :disabled="addDisabled"
-        class="shrink-0 rounded-lg px-3 py-2 border text-left transition-all bg-white text-slate-400 border-slate-100 flex items-center justify-center min-w-[108px]"
-        :class="addDisabled ? 'opacity-40 pointer-events-none' : ''"
-        type="button"
-        aria-label="Добавить неделю"
-      >
-        <Plus class="w-5 h-5" />
+        {{ showMineOnly ? 'Мои' : 'Все' }}
       </button>
     </div>
 
@@ -76,26 +91,5 @@ const handleWeekClick = (event, weekStart) => {
       </div>
     </div>
 
-    <button
-      type="button"
-      @click="emit('toggle-mine')"
-      class="mb-4 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all active:scale-[0.99]"
-      :class="
-        showMineOnly
-          ? 'border-blue-200 bg-blue-50 text-blue-600'
-          : 'border-slate-100 bg-white text-slate-400'
-      "
-    >
-      <span class="text-[10px] font-black uppercase">Показывать только мои смены</span>
-      <span
-        class="h-5 w-9 rounded-full p-0.5 transition-colors"
-        :class="showMineOnly ? 'bg-blue-600' : 'bg-slate-200'"
-      >
-        <span
-          class="block h-4 w-4 rounded-full bg-white transition-transform"
-          :class="showMineOnly ? 'translate-x-4' : 'translate-x-0'"
-        />
-      </span>
-    </button>
   </div>
 </template>

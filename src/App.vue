@@ -47,6 +47,15 @@ const canManageRoles = computed(() => Boolean(userPermissions.value.rolesManage)
 const isChef = computed(() => userRole.value === 'chef')
 const canAccessSchedule = computed(() => userRole.value !== 'chef')
 const canAccessArchive = computed(() => isChef.value || canViewAudit.value)
+const reportEditable = computed(
+  () =>
+    reportCanEditToday.value &&
+    !isChef.value &&
+    (!reportCompleted.value || userRole.value === 'admin'),
+)
+const REPORT_COMPLETE_HINT_KEY = 'kofeyny:report-complete-hint-seen:v1'
+const reportCompleteConfirmOpen = ref(false)
+const reportCompleteConfirmFirstTime = ref(false)
 const {
   products,
   dailyEntries,
@@ -243,6 +252,35 @@ const openScheduleRequests = () => {
   scheduleViewRef.value?.openPendingRequests()
 }
 
+const openReportCompleteConfirm = () => {
+  if (!reportCanEditToday.value || isChef.value || reportCompleting.value) return
+
+  const seen =
+    typeof window !== 'undefined' &&
+    window.localStorage.getItem(REPORT_COMPLETE_HINT_KEY) === '1'
+  reportCompleteConfirmFirstTime.value = !seen
+  reportCompleteConfirmOpen.value = true
+}
+
+const closeReportCompleteConfirm = () => {
+  if (reportCompleting.value) return
+  reportCompleteConfirmOpen.value = false
+}
+
+const confirmReportComplete = async () => {
+  if (reportCompleted.value) {
+    closeReportCompleteConfirm()
+    return
+  }
+
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(REPORT_COMPLETE_HINT_KEY, '1')
+  }
+
+  await completeReport()
+  reportCompleteConfirmOpen.value = false
+}
+
 watch([isChef, canAccessArchive, canAccessSchedule], ([chef, archiveAllowed, scheduleAllowed]) => {
   if (chef && activeTab.value !== 'archive') {
     navigateTo('archive', true)
@@ -331,8 +369,12 @@ onBeforeUnmount(() => {
         :user-role="userRole"
         :can-manage-schedule="canManageSchedule"
         :schedule-pending-count="schedulePendingCount"
+        :report-can-complete="activeTab === 'main' && reportCanEditToday && !isChef"
+        :report-completed="reportCompleted"
+        :report-completing="reportCompleting"
         @open-schedule-requests="openScheduleRequests"
         @open-schedule-action="openScheduleAction"
+        @complete-report="openReportCompleteConfirm"
       />
 
       <main :class="activeTab === 'profile' ? 'p-2 pt-safe' : 'p-2'">
@@ -408,14 +450,9 @@ onBeforeUnmount(() => {
             v-else
             :products="products"
             :daily-entries="dailyEntries"
-            :editable="reportCanEditToday && !isChef"
-            :report-completed="reportCompleted"
-            :report-completed-at="reportCompletedAt"
-            :report-completed-by-name="reportCompletedByName"
-            :report-completing="reportCompleting"
+            :editable="reportEditable"
             @add-product="onAddProduct"
             @remove-entry="removeReportEntry"
-            @complete-report="completeReport"
           />
         </div>
       </main>
@@ -439,6 +476,56 @@ onBeforeUnmount(() => {
           {{ reportSaveLabel }}
         </div>
       </div>
+
+      <Teleport to="body">
+        <Transition name="sheet">
+          <div
+            v-if="reportCompleteConfirmOpen"
+            class="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm"
+            @click.self="closeReportCompleteConfirm"
+          >
+            <section class="w-full max-w-sm rounded-2xl border border-slate-100 bg-white p-4 shadow-2xl">
+              <p class="text-[10px] font-black uppercase tracking-widest text-blue-600">
+                Подтверждение отчета
+              </p>
+              <h2 class="mt-1 text-lg font-black text-slate-900">
+                {{ reportCompleted ? 'Отчет уже готов' : 'Отметить отчет готовым?' }}
+              </h2>
+              <p class="mt-2 text-sm font-bold leading-relaxed text-slate-500">
+                <template v-if="reportCompleteConfirmFirstTime && !reportCompleted">
+                  После подтверждения отчет считается закрытым. Если потом нужно будет
+                  изменить отчет или снять статус готовности, это сможет сделать только админ.
+                </template>
+                <template v-else-if="reportCompleted">
+                  Статус уже установлен. Если данные нужно изменить, обратитесь к админу.
+                </template>
+                <template v-else>
+                  Подтвердите, что отчет заполнен и его можно закрыть.
+                </template>
+              </p>
+
+              <div class="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  :disabled="reportCompleting"
+                  @click="closeReportCompleteConfirm"
+                  class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-[11px] font-black uppercase text-slate-500 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Закрыть
+                </button>
+                <button
+                  type="button"
+                  :disabled="reportCompleting"
+                  @click="confirmReportComplete"
+                  class="rounded-lg bg-blue-600 px-3 py-3 text-[11px] font-black uppercase text-white shadow-lg shadow-blue-100 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {{ reportCompleting ? 'Сохраняем...' : reportCompleted ? 'Понятно' : 'Подтвердить' }}
+                </button>
+              </div>
+            </section>
+          </div>
+        </Transition>
+      </Teleport>
     </template>
   </div>
 </template>
