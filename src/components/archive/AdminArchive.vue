@@ -37,6 +37,7 @@ const {
   shiftsLoadMoreRef,
   auditLoadMoreRef,
   auditLogs,
+  shiftHistoryTotal,
   writeOffChartDays,
   writeOffDetails,
   selectedWriteOffDate,
@@ -248,7 +249,7 @@ const {
             "
           >
             <span class="block text-[10px] font-black uppercase">Все</span>
-            <span class="block text-xs font-black">{{ baseShifts.length }} смен</span>
+            <span class="block text-xs font-black">{{ shiftHistoryTotal || baseShifts.length }} смен</span>
           </button>
 
           <button

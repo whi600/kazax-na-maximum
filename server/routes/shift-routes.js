@@ -12,6 +12,7 @@ import {
   insertShiftStatement,
   countArchiveShiftsStatement,
   listEmployeeUsersStatement,
+  listArchiveShiftEmployeeCountsStatement,
   listArchiveShiftsPageStatement,
   listPendingShiftUnbookRequestsStatement,
   listScheduleAssignableUsersStatement,
@@ -182,16 +183,24 @@ export const handleShiftRoutes = async ({ req, res, pathname, requestUrl, db }) 
       Math.min(500, parseInteger(requestUrl.searchParams.get('limit'), 10)),
     )
     const offset = Math.max(0, parseInteger(requestUrl.searchParams.get('offset'), 0))
-    const [rows, countRow] = await Promise.all([
+    const [rows, countRow, employeeCountRows] = await Promise.all([
       listArchiveShiftsPageStatement.all(limit, offset),
       countArchiveShiftsStatement.get(),
+      listArchiveShiftEmployeeCountsStatement.all(),
     ])
     const total = Number(countRow?.count || 0)
+    const employeeCounts = employeeCountRows.map((row) => ({
+      name: row.employee_name,
+      count: Number(row.count || 0),
+    }))
+    const assignedTotal = employeeCounts.reduce((sum, employee) => sum + employee.count, 0)
     json(res, 200, {
       shifts: rows.map(toShiftDto),
       limit,
       offset,
       total,
+      assignedTotal,
+      employeeCounts,
       hasMore: offset + limit < total,
     })
     return true

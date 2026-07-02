@@ -36,6 +36,8 @@ export const useArchiveData = (props) => {
   const shifts = ref([])
   const hoursShifts = ref([])
   const auditLogs = ref([])
+  const shiftHistoryTotal = ref(0)
+  const shiftHistoryEmployeeCounts = ref([])
   const writeOffDays = ref([])
   const writeOffDetails = ref([])
   const selectedWriteOffDate = ref('')
@@ -80,8 +82,15 @@ export const useArchiveData = (props) => {
   )
 
   const employees = computed(() => {
-    const stats = new Map()
+    if (shiftHistoryEmployeeCounts.value.length > 0) {
+      return shiftHistoryEmployeeCounts.value.map((employee) => ({
+        key: employee.name,
+        name: employee.name,
+        count: employee.count,
+      }))
+    }
 
+    const stats = new Map()
     baseShifts.value.forEach((shift) => {
       const current = stats.get(shift.employee_name) || 0
       stats.set(shift.employee_name, current + 1)
@@ -139,7 +148,15 @@ export const useArchiveData = (props) => {
   })
 
   const selectedEmployeeSummary = computed(
-    () => `${selectedEmployeeName.value}: ${filteredShifts.value.length} смен`,
+    () => {
+      const total =
+        selectedEmployee.value === 'all'
+          ? shiftHistoryTotal.value || filteredShifts.value.length
+          : employees.value.find((employee) => employee.key === selectedEmployee.value)?.count ||
+            filteredShifts.value.length
+
+      return `${selectedEmployeeName.value}: ${total} смен`
+    },
   )
 
   const periodShifts = computed(() =>
@@ -363,6 +380,13 @@ export const useArchiveData = (props) => {
         (shift) => shift?.date && shift?.start_time && shift?.end_time,
       )
       shifts.value = append ? [...shifts.value, ...rows] : rows
+      shiftHistoryTotal.value = Number(response.assignedTotal || 0)
+      shiftHistoryEmployeeCounts.value = (response.employeeCounts || [])
+        .filter((employee) => employee?.name)
+        .map((employee) => ({
+          name: employee.name,
+          count: Number(employee.count || 0),
+        }))
       shiftsHasMore.value = Boolean(response.hasMore)
       shiftsOffset.value = offset + Number(response.limit || SHIFT_HISTORY_PAGE_SIZE)
     } catch (error) {
@@ -521,6 +545,7 @@ export const useArchiveData = (props) => {
     shiftsLoadMoreRef,
     auditLoadMoreRef,
     baseShifts,
+    shiftHistoryTotal,
     employees,
     groupedShiftHistory,
     selectedEmployeeSummary,

@@ -48,6 +48,18 @@ export const countArchiveShiftsStatement = db.prepare(`
   WHERE deleted_at IS NULL
 `)
 
+export const listArchiveShiftEmployeeCountsStatement = db.prepare(`
+  SELECT
+    employee_name,
+    COUNT(*)::int AS count
+  FROM shifts
+  WHERE deleted_at IS NULL
+    AND status = 'approved'
+    AND employee_name IS NOT NULL
+  GROUP BY employee_name
+  ORDER BY LOWER(employee_name) ASC
+`)
+
 export const listReminderShiftsStatement = db.prepare(`
   SELECT id, date, start_time, end_time, employee_name
   FROM shifts
