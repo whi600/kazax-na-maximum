@@ -206,7 +206,7 @@ const {
                 class="mt-2 text-[9px] font-black uppercase"
                 :class="selectedWriteOffDate === day.date ? 'text-blue-600' : 'text-slate-400'"
               >
-                {{ formatShiftDay(day.date) }}
+                {{ day.dateLabel }}
               </span>
             </button>
             <div

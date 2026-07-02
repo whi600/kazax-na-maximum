@@ -7,6 +7,7 @@ import {
   formatAuditSummary,
   formatDateLabel,
   formatHours,
+  formatShortDate,
   formatShiftDay,
   formatShiftWeekday,
   getRecordDateKey,
@@ -247,8 +248,10 @@ export const useArchiveData = (props) => {
 
   const writeOffChartDays = computed(() =>
     [...writeOffDays.value]
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
       .map((day) => ({
         ...day,
+        dateLabel: formatShortDate(day.date),
         heightPercent: Math.max(
           8,
           Math.round((Number(day.totalWriteOff || 0) / maxWriteOffTotal.value) * 100),
@@ -597,6 +600,7 @@ export const useArchiveData = (props) => {
     formatAuditSummary,
     formatDateLabel,
     formatHours,
+    formatShortDate,
     formatShiftDay,
     formatShiftWeekday,
   }

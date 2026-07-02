@@ -128,22 +128,26 @@ export const deleteDailyReportStatusStatement = db.prepare(
 )
 
 export const listWriteOffTotalsPageStatement = db.prepare(`
+  WITH selected_dates AS (
+    SELECT DISTINCT record_date
+    FROM daily_records
+    ORDER BY record_date DESC
+    LIMIT ?
+    OFFSET ?
+  )
   SELECT
-    record_date,
-    SUM(write_off)::float AS total_write_off,
-    COUNT(*)::int AS items_count
-  FROM daily_records
-  WHERE write_off > 0
-  GROUP BY record_date
-  ORDER BY record_date DESC
-  LIMIT ?
-  OFFSET ?
+    sd.record_date,
+    COALESCE(SUM(CASE WHEN dr.write_off > 0 THEN dr.write_off ELSE 0 END), 0)::float AS total_write_off,
+    COUNT(*) FILTER (WHERE dr.write_off > 0)::int AS items_count
+  FROM selected_dates sd
+  LEFT JOIN daily_records dr ON dr.record_date = sd.record_date
+  GROUP BY sd.record_date
+  ORDER BY sd.record_date DESC
 `)
 
 export const countWriteOffDaysStatement = db.prepare(`
   SELECT COUNT(DISTINCT record_date)::int AS count
   FROM daily_records
-  WHERE write_off > 0
 `)
 
 export const listWriteOffDetailsByDateStatement = db.prepare(`

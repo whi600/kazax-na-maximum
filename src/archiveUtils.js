@@ -53,6 +53,13 @@ export const formatShiftDay = (dateStr) =>
     month: 'long',
   })
 
+export const formatShortDate = (dateStr) => {
+  const date = parseDate(dateStr)
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${day}.${month}`
+}
+
 export const formatShiftWeekday = (dateStr) =>
   parseDate(dateStr).toLocaleDateString('ru-RU', { weekday: 'long' })
 
