@@ -164,6 +164,7 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, requestUrl
     }))
 
     json(res, 200, {
+      recordDate: today,
       entries,
       canEdit: await canEditDailyReport(user, today),
       reportStatus: mapReportStatus(await getDailyReportStatusStatement.get(today)),

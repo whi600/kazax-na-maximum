@@ -64,6 +64,7 @@ const {
   reportCompletedAt,
   reportCompletedByName,
   reportCompleting,
+  reportSaveStatus,
   reportSaveLabel,
   reportSaveClass,
   productSaveBusy,
@@ -75,6 +76,7 @@ const {
   onAddProduct,
   removeReportEntry,
   saveReport,
+  retryReportSave,
   completeReport,
   scheduleReportAutosave,
   startEditProduct,
@@ -82,7 +84,7 @@ const {
   removeProduct,
   clearReportState,
   cleanupReportTimers,
-} = useReportState({ canManageProducts })
+} = useReportState({ canManageProducts, currentUser })
 const {
   activeTab,
   pageTitle,
@@ -466,14 +468,23 @@ onBeforeUnmount(() => {
 
       <div
         v-if="activeTab === 'main' && reportCanEditToday && reportSaveLabel"
-        class="fixed left-1/2 -translate-x-1/2 z-[120] pointer-events-none"
+        class="fixed left-1/2 -translate-x-1/2 z-[120]"
+        :class="reportSaveStatus === 'error' ? 'pointer-events-auto' : 'pointer-events-none'"
         :style="{ bottom: 'calc(86px + var(--app-safe-bottom))' }"
       >
         <div
-          class="rounded-full border px-4 py-2 text-[11px] font-black uppercase shadow-sm backdrop-blur-sm"
+          class="rounded-full border px-4 py-2 text-[11px] font-black uppercase shadow-sm backdrop-blur-sm flex items-center gap-3"
           :class="reportSaveClass"
         >
-          {{ reportSaveLabel }}
+          <span>{{ reportSaveLabel }}</span>
+          <button
+            v-if="reportSaveStatus === 'error'"
+            type="button"
+            @click="retryReportSave"
+            class="rounded-full bg-red-500 px-3 py-1 text-[10px] font-black uppercase text-white active:scale-95 transition-all"
+          >
+            Повторить
+          </button>
         </div>
       </div>
 

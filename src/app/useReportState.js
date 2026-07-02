@@ -1,9 +1,38 @@
 import { computed, ref } from 'vue'
 import { recordsApi } from '../api'
 
-export const useReportState = ({ canManageProducts }) => {
+const REPORT_DRAFT_PREFIX = 'kofeyny:daily-report-draft:v2'
+
+const getFallbackDateKey = () => {
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const normalizeReportNumber = (value) => {
+  if (value === null || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const normalizeDraftEntries = (entries) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      product_id: entry.product_id,
+      name: entry.name,
+      category: entry.category || 'other',
+      arrival: normalizeReportNumber(entry.arrival),
+      remainder: normalizeReportNumber(entry.remainder),
+      write_off: normalizeReportNumber(entry.write_off),
+    }))
+    .filter((entry) => Number.isFinite(Number(entry.product_id)))
+
+export const useReportState = ({ canManageProducts, currentUser }) => {
   const products = ref([])
   const dailyEntries = ref([])
+  const reportDate = ref('')
   const reportCanEditToday = ref(false)
   const reportCompleted = ref(false)
   const reportCompletedAt = ref(null)
@@ -19,6 +48,53 @@ export const useReportState = ({ canManageProducts }) => {
   })
   let reportAutosaveTimer = null
   let reportStatusHideTimer = null
+
+  const getReportDraftKey = () => {
+    const date = reportDate.value || getFallbackDateKey()
+    const userId = currentUser?.value?.id || 'anonymous'
+    return `${REPORT_DRAFT_PREFIX}:${userId}:${date}`
+  }
+
+  const readLocalReportDraft = () => {
+    if (typeof window === 'undefined') return null
+
+    try {
+      const raw = window.localStorage.getItem(getReportDraftKey())
+      if (!raw) return null
+      const draft = JSON.parse(raw)
+      if (!Array.isArray(draft?.entries)) return null
+      return {
+        ...draft,
+        entries: normalizeDraftEntries(draft.entries),
+      }
+    } catch {
+      return null
+    }
+  }
+
+  const persistLocalReportDraft = () => {
+    if (typeof window === 'undefined') return false
+
+    try {
+      window.localStorage.setItem(
+        getReportDraftKey(),
+        JSON.stringify({
+          status: 'pending',
+          recordDate: reportDate.value || getFallbackDateKey(),
+          updatedAt: new Date().toISOString(),
+          entries: normalizeDraftEntries(dailyEntries.value),
+        }),
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const clearLocalReportDraft = () => {
+    if (typeof window === 'undefined') return
+    window.localStorage.removeItem(getReportDraftKey())
+  }
 
   const resetProductForm = () => {
     editingProductId.value = null
@@ -36,6 +112,7 @@ export const useReportState = ({ canManageProducts }) => {
 
   const loadReportData = async () => {
     const [, todayResponse] = await Promise.all([loadProducts(), recordsApi.today()])
+    reportDate.value = todayResponse.recordDate || getFallbackDateKey()
     reportCanEditToday.value = Boolean(todayResponse.canEdit)
     reportCompleted.value = Boolean(todayResponse.reportStatus?.completed)
     reportCompletedAt.value = todayResponse.reportStatus?.completedAt || null
@@ -48,6 +125,12 @@ export const useReportState = ({ canManageProducts }) => {
       remainder: entry.remainder ?? null,
       write_off: entry.write_off ?? null,
     }))
+
+    const localDraft = readLocalReportDraft()
+    if (localDraft?.entries?.length && reportCanEditToday.value && !reportCompleted.value) {
+      dailyEntries.value = localDraft.entries
+      setReportSaveStatus('error')
+    }
   }
 
   const onAddProduct = (product) => {
@@ -99,7 +182,7 @@ export const useReportState = ({ canManageProducts }) => {
     reportSaveStatus.value = status
     if (reportStatusHideTimer) clearTimeout(reportStatusHideTimer)
 
-    if (status === 'saved' || status === 'error') {
+    if (status === 'saved') {
       reportStatusHideTimer = setTimeout(() => {
         reportSaveStatus.value = 'idle'
         reportStatusHideTimer = null
@@ -109,7 +192,7 @@ export const useReportState = ({ canManageProducts }) => {
 
   const reportSaveLabel = computed(() => {
     if (reportSaveStatus.value === 'saving') return 'Сохраняется...'
-    if (reportSaveStatus.value === 'error') return 'Ошибка сохранения'
+    if (reportSaveStatus.value === 'error') return 'ОШИБКА СОХРАНЕНИЯ'
     if (reportSaveStatus.value === 'saved') return 'Сохранено'
     return ''
   })
@@ -123,6 +206,14 @@ export const useReportState = ({ canManageProducts }) => {
 
   const saveReport = async ({ silent = false, autosave = false } = {}) => {
     if (!reportCanEditToday.value) return false
+    const localDraftSaved = persistLocalReportDraft()
+    if (!localDraftSaved) {
+      setReportSaveStatus('error')
+      if (!silent) {
+        alert('Не удалось сохранить черновик на устройстве')
+      }
+      return false
+    }
 
     if (autosave) {
       setReportSaveStatus('saving')
@@ -130,6 +221,7 @@ export const useReportState = ({ canManageProducts }) => {
 
     try {
       await recordsApi.saveToday(buildReportPayload())
+      clearLocalReportDraft()
       reportCompleted.value = false
       reportCompletedAt.value = null
       reportCompletedByName.value = ''
@@ -146,6 +238,8 @@ export const useReportState = ({ canManageProducts }) => {
       return false
     }
   }
+
+  const retryReportSave = () => saveReport({ silent: true, autosave: true })
 
   const completeReport = async () => {
     if (!reportCanEditToday.value || reportCompleting.value) return
@@ -243,6 +337,7 @@ export const useReportState = ({ canManageProducts }) => {
   const clearReportState = () => {
     products.value = []
     dailyEntries.value = []
+    reportDate.value = ''
     reportCanEditToday.value = false
     reportCompleted.value = false
     reportCompletedAt.value = null
@@ -266,6 +361,7 @@ export const useReportState = ({ canManageProducts }) => {
     reportCompleting,
     reportSaveLabel,
     reportSaveClass,
+    reportSaveStatus,
     productSaveBusy,
     editingProductId,
     productForm,
@@ -275,6 +371,7 @@ export const useReportState = ({ canManageProducts }) => {
     onAddProduct,
     removeReportEntry,
     saveReport,
+    retryReportSave,
     completeReport,
     scheduleReportAutosave,
     startEditProduct,
