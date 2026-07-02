@@ -172,23 +172,25 @@ const {
             </div>
           </div>
 
-          <div class="flex h-44 items-end gap-2 overflow-x-auto pb-1">
+          <div class="flex h-44 items-stretch gap-2 overflow-x-auto pb-1">
             <button
               v-for="day in writeOffChartDays"
               :key="day.date"
               type="button"
               @click="loadWriteOffDetails(day.date)"
-              class="flex min-w-12 flex-1 flex-col items-center justify-end gap-2 rounded-lg px-1 py-1 transition-all active:scale-95"
+              class="flex min-w-12 flex-1 flex-col items-center rounded-lg px-1 py-1 transition-all active:scale-95"
               :class="selectedWriteOffDate === day.date ? 'bg-blue-50' : 'bg-slate-50'"
             >
               <span class="text-[10px] font-black text-slate-500">
                 {{ day.totalWriteOff }}
               </span>
-              <span
-                class="w-full max-w-8 rounded-t-lg transition-all duration-300"
-                :class="selectedWriteOffDate === day.date ? 'bg-blue-600' : 'bg-slate-300'"
-                :style="{ height: `${day.heightPercent}%` }"
-              />
+              <span class="mt-2 flex min-h-0 flex-1 items-end justify-center self-stretch">
+                <span
+                  class="w-full max-w-8 rounded-t-lg transition-all duration-300"
+                  :class="selectedWriteOffDate === day.date ? 'bg-blue-600' : 'bg-slate-300'"
+                  :style="{ height: `${day.heightPercent}%` }"
+                />
+              </span>
               <span class="text-[9px] font-black uppercase text-slate-400">
                 {{ formatShiftDay(day.date) }}
               </span>
