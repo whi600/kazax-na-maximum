@@ -19,7 +19,7 @@ const RECORDS_PAGE_DAYS = 3
 const SHIFT_HISTORY_PAGE_SIZE = 10
 const AUDIT_PAGE_SIZE = 15
 const SHIFT_HOURS_MAX_SIZE = 500
-const WRITE_OFF_ANALYTICS_DAYS = 10
+const WRITE_OFF_ANALYTICS_PAGE_DAYS = 10
 
 export const normalizeArchiveView = (view) => {
   if (view === 'shifts') return 'shiftHistory'
@@ -55,9 +55,11 @@ export const useArchiveData = (props) => {
   const recordsHasMore = ref(false)
   const shiftsHasMore = ref(false)
   const auditHasMore = ref(false)
+  const writeOffHasMore = ref(false)
   const recordsOffsetDays = ref(0)
   const shiftsOffset = ref(0)
   const auditOffset = ref(0)
+  const writeOffOffsetDays = ref(0)
 
   const selectedEmployee = ref('all')
   const periodStart = ref('')
@@ -65,6 +67,7 @@ export const useArchiveData = (props) => {
   const recordsLoadMoreRef = ref(null)
   const shiftsLoadMoreRef = ref(null)
   const auditLoadMoreRef = ref(null)
+  const writeOffChartScrollerRef = ref(null)
   let recordsLoadObserver = null
 
   const safeAlert = (message) => alert(message)
@@ -244,7 +247,6 @@ export const useArchiveData = (props) => {
 
   const writeOffChartDays = computed(() =>
     [...writeOffDays.value]
-      .sort((a, b) => (a.date > b.date ? 1 : -1))
       .map((day) => ({
         ...day,
         heightPercent: Math.max(
@@ -261,6 +263,7 @@ export const useArchiveData = (props) => {
   const hasMoreRecordDays = computed(() => recordsHasMore.value)
   const hasMoreShifts = computed(() => shiftsHasMore.value)
   const hasMoreAudit = computed(() => auditHasMore.value)
+  const hasMoreWriteOffDays = computed(() => writeOffHasMore.value)
 
   const mergeRecords = (rows) => {
     const grouped = { ...recordsHistory.value }
@@ -448,23 +451,43 @@ export const useArchiveData = (props) => {
     }
   }
 
-  const loadWriteOffAnalytics = async () => {
+  const loadWriteOffAnalytics = async ({ append = false } = {}) => {
     if (analyticsLoading.value) return
     analyticsLoading.value = true
 
     try {
+      const offsetDays = append ? writeOffOffsetDays.value : 0
       const response = await recordsApi.writeOffAnalytics({
-        limitDays: WRITE_OFF_ANALYTICS_DAYS,
+        limitDays: WRITE_OFF_ANALYTICS_PAGE_DAYS,
+        offsetDays,
       })
-      writeOffDays.value = response.days || []
+      const rows = response.days || []
+      writeOffDays.value = append ? [...writeOffDays.value, ...rows] : rows
+      writeOffHasMore.value = Boolean(response.hasMore)
+      writeOffOffsetDays.value = offsetDays + Number(response.limitDays || WRITE_OFF_ANALYTICS_PAGE_DAYS)
       analyticsLoaded.value = true
 
-      const firstDate = writeOffDays.value[0]?.date || ''
+      const firstDate = selectedWriteOffDate.value || writeOffDays.value[0]?.date || ''
       if (firstDate) await loadWriteOffDetails(firstDate)
     } catch (error) {
       safeAlert(error?.message || 'Ошибка загрузки аналитики')
     } finally {
       analyticsLoading.value = false
+    }
+  }
+
+  const loadMoreWriteOffDays = () => {
+    if (!hasMoreWriteOffDays.value || analyticsLoading.value) return
+    loadWriteOffAnalytics({ append: true })
+  }
+
+  const handleWriteOffChartScroll = (event) => {
+    const target = event?.currentTarget
+    if (!target) return
+
+    const distanceToEnd = target.scrollWidth - target.clientWidth - target.scrollLeft
+    if (distanceToEnd < 80) {
+      loadMoreWriteOffDays()
     }
   }
 
@@ -544,6 +567,7 @@ export const useArchiveData = (props) => {
     recordsLoadMoreRef,
     shiftsLoadMoreRef,
     auditLoadMoreRef,
+    writeOffChartScrollerRef,
     baseShifts,
     shiftHistoryTotal,
     employees,
@@ -559,12 +583,14 @@ export const useArchiveData = (props) => {
     hasMoreRecordDays,
     hasMoreShifts,
     hasMoreAudit,
+    hasMoreWriteOffDays,
     auditLogs,
     writeOffChartDays,
     writeOffDetails,
     selectedWriteOffDate,
     selectedWriteOffLabel,
     loadWriteOffDetails,
+    handleWriteOffChartScroll,
     formatDateTimeLabel,
     formatAuditAction,
     formatAuditEntity,

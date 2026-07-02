@@ -73,8 +73,11 @@ export const recordsApi = {
       `/api/archive/records?limitDays=${limitDays}&offsetDays=${offsetDays}`,
       { method: 'GET' },
     ),
-  writeOffAnalytics: ({ limitDays = 10 } = {}) =>
-    apiRequest(`/api/analytics/write-offs?limitDays=${limitDays}`, { method: 'GET' }),
+  writeOffAnalytics: ({ limitDays = 10, offsetDays = 0 } = {}) =>
+    apiRequest(
+      `/api/analytics/write-offs?limitDays=${limitDays}&offsetDays=${offsetDays}`,
+      { method: 'GET' },
+    ),
   writeOffDetails: (date) =>
     apiRequest(`/api/analytics/write-offs?date=${encodeURIComponent(date)}`, {
       method: 'GET',

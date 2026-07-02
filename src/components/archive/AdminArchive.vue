@@ -34,8 +34,10 @@ const {
   hasMoreRecordDays,
   hasMoreShifts,
   hasMoreAudit,
+  hasMoreWriteOffDays,
   shiftsLoadMoreRef,
   auditLoadMoreRef,
+  writeOffChartScrollerRef,
   auditLogs,
   shiftHistoryTotal,
   writeOffChartDays,
@@ -43,6 +45,7 @@ const {
   selectedWriteOffDate,
   selectedWriteOffLabel,
   loadWriteOffDetails,
+  handleWriteOffChartScroll,
   formatDateTimeLabel,
   formatAuditAction,
   formatAuditEntity,
@@ -172,7 +175,11 @@ const {
             </div>
           </div>
 
-          <div class="flex h-44 items-stretch gap-2 overflow-x-auto pb-1">
+          <div
+            ref="writeOffChartScrollerRef"
+            class="flex h-44 items-stretch gap-2 overflow-x-auto pb-1"
+            @scroll.passive="handleWriteOffChartScroll"
+          >
             <button
               v-for="day in writeOffChartDays"
               :key="day.date"
@@ -202,6 +209,12 @@ const {
                 {{ formatShiftDay(day.date) }}
               </span>
             </button>
+            <div
+              v-if="hasMoreWriteOffDays"
+              class="flex min-w-12 flex-col items-center justify-end pb-6 text-center text-[9px] font-black uppercase text-slate-300"
+            >
+              Еще
+            </div>
           </div>
         </section>
 

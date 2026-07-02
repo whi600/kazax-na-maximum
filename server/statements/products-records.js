@@ -127,16 +127,23 @@ export const deleteDailyReportStatusStatement = db.prepare(
   'DELETE FROM daily_report_status WHERE record_date = ?',
 )
 
-export const listWriteOffTotalsStatement = db.prepare(`
+export const listWriteOffTotalsPageStatement = db.prepare(`
   SELECT
     record_date,
     SUM(write_off)::float AS total_write_off,
     COUNT(*)::int AS items_count
   FROM daily_records
-  WHERE record_date >= ?
-    AND write_off > 0
+  WHERE write_off > 0
   GROUP BY record_date
   ORDER BY record_date DESC
+  LIMIT ?
+  OFFSET ?
+`)
+
+export const countWriteOffDaysStatement = db.prepare(`
+  SELECT COUNT(DISTINCT record_date)::int AS count
+  FROM daily_records
+  WHERE write_off > 0
 `)
 
 export const listWriteOffDetailsByDateStatement = db.prepare(`

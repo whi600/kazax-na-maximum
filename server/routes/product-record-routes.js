@@ -2,6 +2,7 @@ import { requirePermission, requireUser } from '../auth.js'
 import { logAudit, touchResource } from '../audit.js'
 import { badRequest, forbidden, json, notFound, readJsonBody } from '../http.js'
 import {
+  countWriteOffDaysStatement,
   deleteProductStatement,
   deleteDailyReportStatusStatement,
   deleteTodayRecordsStatement,
@@ -13,7 +14,7 @@ import {
   insertProductStatement,
   listArchiveRecordsPageStatement,
   listWriteOffDetailsByDateStatement,
-  listWriteOffTotalsStatement,
+  listWriteOffTotalsPageStatement,
   listProductsStatement,
   listTodayRecordsStatement,
   upsertDailyReportStatusStatement,
@@ -283,18 +284,26 @@ export const handleProductRecordRoutes = async ({ req, res, pathname, requestUrl
       return true
     }
 
-    const limitDays = Math.max(
-      1,
-      Math.min(30, parseInteger(requestUrl.searchParams.get('limitDays'), REPORT_ARCHIVE_DAYS)),
-    )
-    const retentionStartDate = getRetentionStartDate(limitDays)
-    const days = (await listWriteOffTotalsStatement.all(retentionStartDate)).map((row) => ({
+    const limitDays = Math.max(1, Math.min(30, parseInteger(requestUrl.searchParams.get('limitDays'), 10)))
+    const offsetDays = Math.max(0, parseInteger(requestUrl.searchParams.get('offsetDays'), 0))
+    const [rows, countRow] = await Promise.all([
+      listWriteOffTotalsPageStatement.all(limitDays, offsetDays),
+      countWriteOffDaysStatement.get(),
+    ])
+    const days = rows.map((row) => ({
       date: row.record_date,
       totalWriteOff: Number(row.total_write_off || 0),
       itemsCount: Number(row.items_count || 0),
     }))
+    const totalDays = Number(countRow?.count || 0)
 
-    json(res, 200, { days, limitDays })
+    json(res, 200, {
+      days,
+      limitDays,
+      offsetDays,
+      totalDays,
+      hasMore: offsetDays + limitDays < totalDays,
+    })
     return true
   }
 
