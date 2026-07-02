@@ -179,19 +179,26 @@ const {
               type="button"
               @click="loadWriteOffDetails(day.date)"
               class="flex min-w-12 flex-1 flex-col items-center rounded-lg px-1 py-1 transition-all active:scale-95"
-              :class="selectedWriteOffDate === day.date ? 'bg-blue-50' : 'bg-slate-50'"
             >
-              <span class="text-[10px] font-black text-slate-500">
-                {{ day.totalWriteOff }}
-              </span>
-              <span class="mt-2 flex min-h-0 flex-1 items-end justify-center self-stretch">
+              <span class="flex min-h-0 flex-1 items-end justify-center self-stretch">
                 <span
-                  class="w-full max-w-8 rounded-t-lg transition-all duration-300"
-                  :class="selectedWriteOffDate === day.date ? 'bg-blue-600' : 'bg-slate-300'"
+                  class="relative flex w-full max-w-9 items-start justify-center rounded-t-xl rounded-b-md px-1 pt-2 shadow-sm transition-all duration-300"
+                  :class="
+                    selectedWriteOffDate === day.date
+                      ? 'bg-blue-600 text-white shadow-blue-100'
+                      : 'bg-slate-200 text-slate-600 shadow-slate-100'
+                  "
                   :style="{ height: `${day.heightPercent}%` }"
-                />
+                >
+                  <span class="text-[10px] font-black leading-none">
+                    {{ day.totalWriteOff }}
+                  </span>
+                </span>
               </span>
-              <span class="text-[9px] font-black uppercase text-slate-400">
+              <span
+                class="mt-2 text-[9px] font-black uppercase"
+                :class="selectedWriteOffDate === day.date ? 'text-blue-600' : 'text-slate-400'"
+              >
                 {{ formatShiftDay(day.date) }}
               </span>
             </button>
