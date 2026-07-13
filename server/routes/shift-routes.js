@@ -117,7 +117,7 @@ const handleBook = async ({ res, db, authUser, shift, shiftId }) => {
     if (!currentShift || currentShift.employee_name) {
       throw new HttpError(400, 'Смена уже занята', 'SHIFT_ALREADY_ASSIGNED')
     }
-    await updateShiftEmployeeStatement.runOn(client, authUser.name, shiftId)
+    await updateShiftEmployeeStatement.runOn(client, authUser.name, authUser.id, shiftId)
     await logAudit({
       actorUser: authUser,
       entityType: 'shift',
@@ -175,7 +175,12 @@ const handleAssign = async ({ req, res, db, authUser, shift, shiftId }) => {
     if (!currentShift || currentShift.employee_name) {
       throw new HttpError(400, 'Смена уже занята', 'SHIFT_ALREADY_ASSIGNED')
     }
-    await updateShiftEmployeeStatement.runOn(client, targetUser.name, shiftId)
+    await updateShiftEmployeeStatement.runOn(
+      client,
+      targetUser.name,
+      targetUser.id,
+      shiftId,
+    )
     await logAudit({
       actorUser: authUser,
       entityType: 'shift',
@@ -218,7 +223,7 @@ const handleUnbook = async ({ res, db, authUser, shift, shiftId }) => {
   const mutation = await mutateSchedule(db, authUser, async (client) => {
     currentShift = await getShiftByIdStatement.getOn(client, shiftId)
     if (!currentShift) throw new HttpError(404, 'Смена не найдена', 'SHIFT_NOT_FOUND')
-    await updateShiftEmployeeStatement.runOn(client, null, shiftId)
+    await updateShiftEmployeeStatement.runOn(client, null, null, shiftId)
     await logAudit({
       actorUser: authUser,
       entityType: 'shift',

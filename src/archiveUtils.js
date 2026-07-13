@@ -115,6 +115,7 @@ export const auditActionLabels = {
   'shift.update': 'Смена изменена',
   'shift.delete': 'Смена удалена',
   'user.role_update': 'Роль пользователя изменена',
+  'daily_report.save': 'Отчет сохранен',
   'daily_report.complete': 'Отчет отмечен готовым',
 }
 

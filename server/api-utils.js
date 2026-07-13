@@ -13,6 +13,7 @@ export const toShiftDto = (row) => ({
   start_time: row.start_time,
   end_time: row.end_time,
   employee_name: row.employee_name,
+  employee_user_id: row.employee_user_id ?? null,
   status: row.status || 'approved',
 })
 
@@ -41,6 +42,7 @@ export const parseUserId = (pathname) => {
 }
 
 export const parseInteger = (value, fallback) => {
+  if (value === null || value === undefined || value === '') return fallback
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return fallback
   return parsed

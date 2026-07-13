@@ -7,6 +7,7 @@ export const listUpcomingShiftsStatement = db.prepare(`
     start_time,
     end_time,
     employee_name,
+    employee_user_id,
     status
   FROM shifts
   WHERE date >= ?
@@ -21,6 +22,7 @@ export const listAllShiftsStatement = db.prepare(`
     start_time,
     end_time,
     employee_name,
+    employee_user_id,
     status
   FROM shifts
   WHERE deleted_at IS NULL
@@ -34,6 +36,7 @@ export const listArchiveShiftsPageStatement = db.prepare(`
     start_time,
     end_time,
     employee_name,
+    employee_user_id,
     status
   FROM shifts
   WHERE deleted_at IS NULL
@@ -90,17 +93,26 @@ export const listEmployeeProfileShiftsStatement = db.prepare(`
 `)
 
 export const getShiftByIdStatement = db.prepare(
-  'SELECT id, date, start_time, end_time, employee_name, status, created_by FROM shifts WHERE id = ? AND deleted_at IS NULL',
+  'SELECT id, date, start_time, end_time, employee_name, employee_user_id, status, created_by FROM shifts WHERE id = ? AND deleted_at IS NULL',
 )
 
 export const insertShiftStatement = db.prepare(`
-  INSERT INTO shifts(date, start_time, end_time, employee_name, status, created_by, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  INSERT INTO shifts(
+    date,
+    start_time,
+    end_time,
+    employee_name,
+    employee_user_id,
+    status,
+    created_by,
+    updated_at
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
   RETURNING id
 `)
 
 export const updateShiftEmployeeStatement = db.prepare(
-  "UPDATE shifts SET employee_name = ?, updated_at = datetime('now') WHERE id = ?",
+  "UPDATE shifts SET employee_name = ?, employee_user_id = ?, updated_at = datetime('now') WHERE id = ?",
 )
 
 export const updateShiftStatusStatement = db.prepare(

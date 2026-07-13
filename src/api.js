@@ -126,6 +126,25 @@ export const recordsApi = {
     }),
   audit: ({ limit = 50, offset = 0 } = {}) =>
     apiRequest(`/api/audit?limit=${limit}&offset=${offset}`, { method: 'GET' }),
+  archiveCalendar: (month) =>
+    apiRequest(`/api/archive/calendar?month=${encodeURIComponent(month)}`, { method: 'GET' }),
+  archiveDay: (date) =>
+    apiRequest(`/api/archive/day?date=${encodeURIComponent(date)}`, { method: 'GET' }),
+  archiveEmployees: ({ search = '', limit = 20, offset = 0 } = {}) =>
+    apiRequest(
+      `/api/archive/employees?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`,
+      { method: 'GET' },
+    ),
+  archiveEmployee: ({ key, limit = 10, offset = 0 }) =>
+    apiRequest(
+      `/api/archive/employee?key=${encodeURIComponent(key)}&limit=${limit}&offset=${offset}`,
+      { method: 'GET' },
+    ),
+  archivePeriod: ({ start, end }) =>
+    apiRequest(
+      `/api/archive/period?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+      { method: 'GET' },
+    ),
 }
 
 export const employeesApi = {

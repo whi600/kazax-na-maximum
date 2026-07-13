@@ -53,7 +53,7 @@ const handleUnbookDecision = async ({ req, res, pathname, db }) => {
           'SHIFT_ASSIGNEE_CHANGED',
         )
       }
-      await updateShiftEmployeeStatement.runOn(client, null, request.shift_id)
+      await updateShiftEmployeeStatement.runOn(client, null, null, request.shift_id)
       await updateShiftUnbookRequestStatusStatement.runOn(
         client,
         'approved',
@@ -125,6 +125,7 @@ const handleHelpRequest = async ({ req, res, db }) => {
       startTime,
       endTime,
       user.name,
+      user.id,
       'pending',
       user.id,
     )

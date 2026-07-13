@@ -65,6 +65,7 @@ const handleAdminCreate = async ({ req, res, db }) => {
         input.startTime,
         input.endTime,
         null,
+        null,
         'approved',
         user.id,
       )

@@ -166,9 +166,10 @@ describe('auth and API boundaries', () => {
       String(yesterday.getDate()).padStart(2, '0'),
     ].join('-')
     await db.query(
-      `INSERT INTO shifts(date, start_time, end_time, employee_name, status)
-       VALUES ($1, '09:00', '15:00', 'Employee', 'approved')`,
-      [date],
+      `INSERT INTO shifts(
+        date, start_time, end_time, employee_name, employee_user_id, status
+      ) VALUES ($1, '09:00', '15:00', 'Employee', $2, 'approved')`,
+      [date, employee.payload.user.id],
     )
 
     const saved = await request(`/api/daily-records/${date}`, {
@@ -303,6 +304,67 @@ describe('auth and API boundaries', () => {
       },
     })
     expect(stale.response.status).toBe(409)
+  })
+
+  it('serves calendar, employee, day, and period archive scenarios', async () => {
+    const today = new Date()
+    const date = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-')
+    const month = date.slice(0, 7)
+    await db.query(
+      `INSERT INTO shifts(
+        date, start_time, end_time, employee_name, employee_user_id, status
+      ) VALUES ($1, '08:00', '12:00', 'Employee', $2, 'approved')`,
+      [date, employee.payload.user.id],
+    )
+
+    const calendar = await request(`/api/archive/calendar?month=${month}`, {
+      cookie: superAdmin.cookie,
+    })
+    expect(calendar.response.status).toBe(200)
+    expect(calendar.payload.days.find((day) => day.date === date)).toMatchObject({
+      hasReport: true,
+      shiftsCount: expect.any(Number),
+    })
+
+    const employees = await request('/api/archive/employees?search=Employee', {
+      cookie: superAdmin.cookie,
+    })
+    expect(employees.response.status).toBe(200)
+    const employeeRow = employees.payload.employees.find(
+      (item) => item.userId === employee.payload.user.id,
+    )
+    expect(employeeRow).toMatchObject({ name: 'Employee' })
+    expect(employeeRow.shiftsCount).toBeGreaterThan(0)
+
+    const detail = await request(
+      `/api/archive/employee?key=${encodeURIComponent(employeeRow.key)}`,
+      { cookie: superAdmin.cookie },
+    )
+    expect(detail.response.status).toBe(200)
+    expect(detail.payload.totals.hours).toBeGreaterThanOrEqual(4)
+
+    const day = await request(`/api/archive/day?date=${date}`, {
+      cookie: superAdmin.cookie,
+    })
+    expect(day.response.status).toBe(200)
+    expect(day.payload.records.length).toBeGreaterThan(0)
+    expect(day.payload.shifts.some((shift) => shift.employee_user_id === employee.payload.user.id))
+      .toBe(true)
+
+    const period = await request(`/api/archive/period?start=${date}&end=${date}`, {
+      cookie: superAdmin.cookie,
+    })
+    expect(period.response.status).toBe(200)
+    expect(period.payload.totals.hours).toBeGreaterThanOrEqual(4)
+
+    const forbidden = await request(`/api/archive/calendar?month=${month}`, {
+      cookie: employee.cookie,
+    })
+    expect(forbidden.response.status).toBe(403)
   })
 
   it('returns a client error for malformed JSON', async () => {

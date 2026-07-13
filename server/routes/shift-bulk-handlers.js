@@ -59,6 +59,7 @@ export const handleBulkSaveShifts = async ({ req, res, db }) => {
           startTime,
           endTime,
           null,
+          null,
           'approved',
           user.id,
         )
