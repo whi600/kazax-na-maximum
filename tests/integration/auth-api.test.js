@@ -65,11 +65,38 @@ describe('auth and API boundaries', () => {
     expect(employee.response.status).toBe(201)
     expect(employee.payload.user.role).toBe('employee')
 
-    const audit = await request('/api/audit?limit=1', { cookie: superAdmin.cookie })
+    const audit = await request('/api/audit?limit=10', { cookie: superAdmin.cookie })
     expect(audit.response.status).toBe(200)
+    expect(audit.payload.logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'user.register', entity_type: 'user' }),
+    ]))
 
     const forbiddenAudit = await request('/api/audit?limit=1', { cookie: employee.cookie })
     expect(forbiddenAudit.response.status).toBe(403)
+  })
+
+  it('records role permission changes in the super-admin audit log', async () => {
+    const current = await request('/api/roles/permissions', { cookie: superAdmin.cookie })
+    expect(current.response.status).toBe(200)
+    const updatedRoles = current.payload.roles.map((item) => item.role === 'employee'
+      ? { ...item, permissions: { ...item.permissions, productsManage: true } }
+      : item)
+
+    const saved = await request('/api/roles/permissions', {
+      method: 'PUT',
+      cookie: superAdmin.cookie,
+      body: { roles: updatedRoles },
+    })
+    expect(saved.response.status).toBe(200)
+
+    const audit = await request('/api/audit?limit=20', { cookie: superAdmin.cookie })
+    expect(audit.payload.logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: 'role.permissions_update',
+        entity_type: 'role_permissions',
+        context: { changedRoles: ['employee'] },
+      }),
+    ]))
   })
 
   it('makes assortment mutations idempotent and rejects stale versions', async () => {

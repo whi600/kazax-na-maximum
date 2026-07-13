@@ -81,3 +81,21 @@ test('admin can use the archive scenarios without horizontal overflow', async ({
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport)
   expect(pageErrors).toEqual([])
 })
+
+test('super-admin sees the human-readable audit journal in the profile', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-chromium', 'One super-admin account is enough for this shared test database.')
+
+  const pageErrors = await registerAdmin({
+    page,
+    email: 'misakurnikov942@gmail.com',
+    name: 'Super Admin',
+  })
+
+  await page.getByRole('button', { name: 'Профиль' }).click()
+  await page.getByRole('button', { name: /Журнал изменений/ }).click()
+
+  await expect(page.getByRole('heading', { name: 'Журнал изменений' })).toBeVisible()
+  await expect(page.getByText('Зарегистрирован сотрудник Super Admin')).toBeVisible()
+  await expect(page.getByText('Последние отчеты')).toHaveCount(0)
+  expect(pageErrors).toEqual([])
+})

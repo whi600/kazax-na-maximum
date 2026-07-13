@@ -1,4 +1,5 @@
 import { toBoolInt, requirePermission, requireUser } from '../auth.js'
+import { logAudit } from '../audit.js'
 import { badRequest, json, readJsonBody } from '../http.js'
 import {
   buildPushPayload,
@@ -120,6 +121,7 @@ export const handleNotificationRoutes = async ({ req, res, pathname }) => {
   if (pathname === '/api/notifications/broadcast' && req.method === 'POST') {
     const access = await requirePermission(req, res, 'scheduleManage')
     if (!access) return true
+    const { user } = access
 
     const body = await readJsonBody(req)
     const title = String(body.title || '').trim().slice(0, 80)
@@ -144,6 +146,17 @@ export const handleNotificationRoutes = async ({ req, res, pathname }) => {
         urgency: 'high',
       }),
     )
+
+    await logAudit({
+      actorUser: user,
+      entityType: 'notification',
+      action: 'notification.broadcast',
+      context: {
+        title,
+        recipientCount: userIds.length,
+        sentCount,
+      },
+    })
 
     json(res, 200, { ok: true, sentCount })
     return true

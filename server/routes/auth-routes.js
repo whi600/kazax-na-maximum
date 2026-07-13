@@ -11,6 +11,7 @@ import {
   SESSION_COOKIE,
   verifyPassword,
 } from '../auth.js'
+import { logAudit } from '../audit.js'
 import { badRequest, json, parseCookies, readJsonBody, unauthorized } from '../http.js'
 import {
   createUserStatement,
@@ -50,6 +51,14 @@ export const handleAuthRoutes = async ({ req, res, pathname, adminEmails }) => {
     const insertResult = await createUserStatement.run(email, passwordHash, name, role)
     const userId = Number(insertResult.lastInsertRowid)
     const user = await getUserByIdStatement.get(userId)
+
+    await logAudit({
+      actorUser: user,
+      entityType: 'user',
+      entityId: userId,
+      action: 'user.register',
+      after: user,
+    })
 
     const sessionId = await createSession(userId)
     setSessionCookie(res, sessionId)

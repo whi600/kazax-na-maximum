@@ -43,6 +43,7 @@ export default defineConfig({
         PORT: String(apiPort),
         NODE_ENV: 'test',
         ADMIN_EMAILS: [
+          'misakurnikov942@gmail.com',
           'e2e-mobile-chromium@example.test',
           'e2e-desktop-chromium@example.test',
           'e2e-mobile-webkit@example.test',

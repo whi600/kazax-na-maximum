@@ -99,52 +99,6 @@ export const formatHours = (hours) => {
   return String(rounded).replace('.', ',')
 }
 
-export const auditActionLabels = {
-  'product.create': 'Товар добавлен',
-  'product.update': 'Товар изменен',
-  'product.delete': 'Товар удален',
-  'shift.help_request': 'Заявка на помощь',
-  'shift.admin_create': 'Смена создана',
-  'shift.bulk_save': 'Изменения расписания',
-  'shift.book': 'Сотрудник записан',
-  'shift.unbook': 'Запись снята',
-  'shift.unbook_request': 'Заявка на снятие',
-  'shift.unbook_request_approve': 'Снятие подтверждено',
-  'shift.unbook_request_reject': 'Снятие отклонено',
-  'shift.approve': 'Заявка подтверждена',
-  'shift.update': 'Смена изменена',
-  'shift.delete': 'Смена удалена',
-  'user.role_update': 'Роль пользователя изменена',
-  'daily_report.save': 'Отчет сохранен',
-  'daily_report.complete': 'Отчет отмечен готовым',
-}
-
-export const auditEntityLabels = {
-  product: 'Ассортимент',
-  shift: 'График',
-  user: 'Пользователи',
-  daily_report: 'Отчет',
-}
-
-export const formatAuditAction = (action) => auditActionLabels[action] || action
-export const formatAuditEntity = (entityType) => auditEntityLabels[entityType] || entityType
-
-export const formatAuditSummary = (log) => {
-  if (log.action === 'shift.bulk_save') {
-    const deleted = Number(log.context?.deletedCount || 0)
-    const created = Number(log.context?.createdCount || 0)
-    return `Добавлено: ${created}, удалено: ${deleted}`
-  }
-
-  const source = log.after || log.before
-  if (source?.name) return source.name
-  if (source?.date && source?.start_time && source?.end_time) {
-    return `${source.date} • ${source.start_time}-${source.end_time}`
-  }
-
-  return ''
-}
-
 export const buildRecordsDaySections = (recordsHistory) =>
   Object.entries(recordsHistory)
     .sort(([a], [b]) => (a < b ? 1 : -1))

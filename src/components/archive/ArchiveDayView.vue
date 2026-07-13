@@ -5,8 +5,8 @@ import {
   formatAuditAction,
   formatAuditEntity,
   formatAuditSummary,
-  formatDateLabel,
-} from '../../archiveUtils'
+} from '../../audit/auditPresentation'
+import { formatDateLabel } from '../../archiveUtils'
 import ArchivePageHeader from './ArchivePageHeader.vue'
 import ArchiveReportsView from './ArchiveReportsView.vue'
 
@@ -96,7 +96,7 @@ const weekday = computed(() => {
         <div class="divide-y divide-slate-100 border-t border-slate-100">
           <article v-for="log in data.changes" :key="log.id" class="px-3 py-2.5">
             <p class="text-xs font-black text-slate-800">
-              {{ formatAuditAction(log.action) }} · {{ formatAuditEntity(log.entity_type) }}
+              {{ formatAuditAction(log) }} · {{ formatAuditEntity(log.entity_type) }}
             </p>
             <p class="mt-0.5 text-[10px] font-semibold text-slate-400">
               {{ log.actor_name }} · {{ formatAuditSummary(log) }}

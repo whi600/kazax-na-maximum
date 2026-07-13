@@ -290,8 +290,14 @@ export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) 
     const body = await readJsonBody(req)
     const roles = Array.isArray(body.roles) ? body.roles : []
     const allowedRoles = new Set(['chef', 'employee'])
+    let responseRoles = []
 
     await db.transaction(async (client) => {
+      const beforeRoles = (await listRolePermissionsStatement.allOn(client)).map((row) => ({
+        role: row.role,
+        permissions: mapPermissionsRow(row),
+      }))
+
       for (const item of roles) {
         const role = String(item?.role || '')
         if (!allowedRoles.has(role)) continue
@@ -307,13 +313,29 @@ export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) 
           toBoolInt(permissions.rolesManage),
         )
       }
-    })
 
-    const rows = await listRolePermissionsStatement.all()
-    const responseRoles = rows.map((row) => ({
-      role: row.role,
-      permissions: mapPermissionsRow(row),
-    }))
+      const rows = await listRolePermissionsStatement.allOn(client)
+      responseRoles = rows.map((row) => ({
+        role: row.role,
+        permissions: mapPermissionsRow(row),
+      }))
+      const beforeByRole = new Map(beforeRoles.map((item) => [item.role, item.permissions]))
+      const changedRoles = responseRoles
+        .filter((item) => JSON.stringify(beforeByRole.get(item.role)) !== JSON.stringify(item.permissions))
+        .map((item) => item.role)
+
+      if (changedRoles.length) {
+        await logAudit({
+          actorUser: access.user,
+          entityType: 'role_permissions',
+          action: 'role.permissions_update',
+          before: { roles: beforeRoles },
+          after: { roles: responseRoles },
+          context: { changedRoles },
+          client,
+        })
+      }
+    })
 
     json(res, 200, { roles: responseRoles })
     return true
