@@ -1,0 +1,44 @@
+name: kofeteriy-acceptance
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: kofeteriy-acceptance-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kofeteriy_acceptance
+      POSTGRES_USER: kofeteriy_acceptance
+      POSTGRES_PASSWORD: kofeteriy_acceptance
+    volumes:
+      - /opt/kofeteriy-acceptance/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kofeteriy_acceptance -d kofeteriy_acceptance"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build:
+      context: .
+    container_name: kofeteriy-acceptance-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Yekaterinburg
+      HOST: 0.0.0.0
+      PORT: 8787
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: kofeteriy_acceptance
+      PGUSER: kofeteriy_acceptance
+      PGPASSWORD: kofeteriy_acceptance
+      ADMIN_EMAILS: misakurnikov942@gmail.com
+      DISABLE_BACKGROUND_JOBS: "1"
+    ports:
+      - "127.0.0.1:18788:8787"
+    volumes:
+      - /opt/kofeteriy-acceptance/data:/app/data
+
