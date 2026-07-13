@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ArrowLeft, Check, Plus, RotateCw, Trash2 } from 'lucide-vue-next'
 import { shiftsApi } from '../../api'
+import NativeTimeButton from '../shared/NativeTimeButton.vue'
 import {
   DEFAULT_WEEK_TEMPLATE_SHIFTS,
   normalizeTemplateShift,
@@ -207,28 +208,20 @@ onMounted(loadTemplate)
           :key="shift.id"
           class="grid grid-cols-[1fr_1fr_auto] items-end gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3"
         >
-          <label class="block">
-            <span class="mb-1 block text-[9px] font-black uppercase text-slate-400">Начало</span>
-            <input
-              type="time"
-              :value="shift.start_time"
-              class="w-full rounded-lg border border-slate-100 bg-white px-2 py-2 text-sm font-black text-slate-900 outline-none focus:border-blue-300"
-              @input="updateShift(shift.id, 'start_time', $event.target.value)"
-            />
-          </label>
-          <label class="block">
-            <span class="mb-1 block text-[9px] font-black uppercase text-slate-400">Конец</span>
-            <input
-              type="time"
-              :value="shift.end_time"
-              class="w-full rounded-lg border border-slate-100 bg-white px-2 py-2 text-sm font-black text-slate-900 outline-none focus:border-blue-300"
-              @input="updateShift(shift.id, 'end_time', $event.target.value)"
-            />
-          </label>
+          <NativeTimeButton
+            :model-value="shift.start_time"
+            label="Начало"
+            @update:model-value="updateShift(shift.id, 'start_time', $event)"
+          />
+          <NativeTimeButton
+            :model-value="shift.end_time"
+            label="Конец"
+            @update:model-value="updateShift(shift.id, 'end_time', $event)"
+          />
           <button
             type="button"
             @click="removeShift(shift.id)"
-            class="mb-0.5 rounded-lg bg-red-50 p-2.5 text-red-500 active:scale-95 transition-all"
+            class="rounded-lg bg-red-50 p-2.5 text-red-500 active:scale-95 transition-all"
             aria-label="Удалить смену"
           >
             <Trash2 class="w-4 h-4" />

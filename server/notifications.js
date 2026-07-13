@@ -1,4 +1,5 @@
 import { toBoolInt } from './auth.js'
+import { getToday } from './date-utils.js'
 import { pushConfig, sendPushNotification } from './push.js'
 import {
   disablePushSubscriptionStatement,
@@ -22,8 +23,6 @@ const REMINDER_WINDOWS = [
 ]
 const REMINDER_LOOKBACK_MS = 15 * 60 * 1000
 const REPORT_REMINDER_BEFORE_END_MS = 30 * 60 * 1000
-
-const getToday = () => new Date().toISOString().slice(0, 10)
 
 export const mapNotificationSettings = (row) => ({
   push_enabled: toBoolInt(row?.push_enabled, 1) === 1,

@@ -1,5 +1,8 @@
 <script setup>
 import { X } from 'lucide-vue-next'
+import { toDateKey } from '../../scheduleUtils'
+import NativeDateButton from '../shared/NativeDateButton.vue'
+import NativeTimeButton from '../shared/NativeTimeButton.vue'
 
 defineProps({
   eyebrow: { type: String, required: true },
@@ -47,42 +50,25 @@ const emit = defineEmits([
               </p>
 
               <div class="space-y-4">
-                <label class="block rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
-                  <span class="mb-2 block text-[10px] font-black uppercase text-slate-400">Выберите дату</span>
-                  <input
-                    type="date"
-                    :value="date"
-                    :min="new Date().toISOString().slice(0, 10)"
-                    class="block w-full rounded-xl border border-slate-100 bg-white px-3 py-3 text-base font-bold text-slate-900 outline-none focus:border-blue-300"
-                    @input="emit('update:date', $event.target.value)"
-                    @change="emit('update:date', $event.target.value)"
-                  />
-                  <span class="mt-2 block text-[11px] font-bold text-slate-400">{{ formattedDate }}</span>
-                </label>
+                <NativeDateButton
+                  :model-value="date"
+                  label="Выберите дату"
+                  :display-value="formattedDate"
+                  :min="toDateKey(new Date())"
+                  @update:model-value="emit('update:date', $event)"
+                />
 
                 <div class="grid grid-cols-2 gap-4">
-                  <div
-                    class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
-                  >
-                    <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Начало</label>
-                    <input
-                      type="time"
-                      :value="startTime"
-                      class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"
-                      @input="emit('update:startTime', $event.target.value)"
-                    />
-                  </div>
-                  <div
-                    class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
-                  >
-                    <label class="mb-2 block text-center text-[10px] font-black uppercase text-slate-400">Конец</label>
-                    <input
-                      type="time"
-                      :value="endTime"
-                      class="w-full cursor-pointer bg-transparent p-0 text-center text-base font-bold text-slate-900 outline-none"
-                      @input="emit('update:endTime', $event.target.value)"
-                    />
-                  </div>
+                  <NativeTimeButton
+                    :model-value="startTime"
+                    label="Начало"
+                    @update:model-value="emit('update:startTime', $event)"
+                  />
+                  <NativeTimeButton
+                    :model-value="endTime"
+                    label="Конец"
+                    @update:model-value="emit('update:endTime', $event)"
+                  />
                 </div>
               </div>
             </div>

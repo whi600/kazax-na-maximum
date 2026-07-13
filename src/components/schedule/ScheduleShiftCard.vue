@@ -1,5 +1,6 @@
 <script setup>
-import { Clock3, Pencil, Trash2, X } from 'lucide-vue-next'
+import { Clock3, X } from 'lucide-vue-next'
+import ScheduleShiftActionsMenu from './ScheduleShiftActionsMenu.vue'
 
 defineProps({
   shift: { type: Object, required: true },
@@ -70,9 +71,9 @@ const emit = defineEmits(['book', 'cancel', 'edit', 'delete'])
         </span>
         <button
           v-else-if="!isPast && (canManageSchedule || canSelfCancel)"
-          @click="emit('cancel')"
           class="p-0.5 text-red-500 transition-colors hover:bg-white rounded-md"
           aria-label="Снять сотрудника со смены"
+          @click="emit('cancel')"
         >
           <X class="h-3.5 w-3.5" />
         </button>
@@ -80,29 +81,17 @@ const emit = defineEmits(['book', 'cancel', 'edit', 'delete'])
 
       <button
         v-else-if="!isPast"
-        @click="emit('book')"
         class="bg-slate-800 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md active:scale-95 transition-all"
+        @click="emit('book')"
       >
         Запись
       </button>
 
-      <button
+      <ScheduleShiftActionsMenu
         v-if="canManageSchedule && !isPast"
-        @click="emit('edit')"
-        class="text-slate-300 hover:text-blue-600 transition-colors"
-        aria-label="Редактировать смену"
-      >
-        <Pencil class="w-4 h-4" />
-      </button>
-
-      <button
-        v-if="canManageSchedule && !isPast"
-        @click="emit('delete')"
-        class="text-slate-200 transition-colors hover:text-red-500"
-        aria-label="Удалить смену"
-      >
-        <Trash2 class="h-4 w-4" />
-      </button>
+        @edit="emit('edit')"
+        @delete="emit('delete')"
+      />
     </div>
   </div>
 </template>

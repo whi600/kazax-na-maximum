@@ -8,6 +8,7 @@ import {
   toBoolInt,
 } from '../auth.js'
 import { isEditableResource, logAudit, parseAuditJson, touchResource } from '../audit.js'
+import { getToday } from '../date-utils.js'
 import { badRequest, forbidden, json, notFound, readJsonBody } from '../http.js'
 import {
   getResourceStateStatement,
@@ -37,8 +38,12 @@ const parseEmployeeSummaryId = (pathname) => {
 
 export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) => {
   if (pathname === '/api/audit' && req.method === 'GET') {
-    const access = await requirePermission(req, res, 'auditView')
-    if (!access) return true
+    const user = await requireUser(req, res)
+    if (!user) return true
+    if (!isSuperAdminUser(user)) {
+      forbidden(res)
+      return true
+    }
 
     const limit = Math.max(1, Math.min(100, parseInteger(requestUrl.searchParams.get('limit'), 50)))
     const offset = Math.max(0, parseInteger(requestUrl.searchParams.get('offset'), 0))
@@ -189,7 +194,7 @@ export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) 
     }
 
     const rows = await listEmployeeProfileShiftsStatement.all(employee.name, 20)
-    const today = new Date().toISOString().slice(0, 10)
+    const today = getToday()
     const upcoming = rows
       .filter((shift) => shift.date >= today)
       .sort((a, b) => `${a.date}T${a.start_time}`.localeCompare(`${b.date}T${b.start_time}`))

@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { toDateKey } from '../../../scheduleUtils'
 
 export const useScheduleShiftModal = ({ canManageSchedule, markShiftInteracted }) => {
   const isModalOpen = ref(false)
@@ -30,7 +31,7 @@ export const useScheduleShiftModal = ({ canManageSchedule, markShiftInteracted }
     isExtraShift.value = isHelp
     editingShiftId.value = null
     form.value = {
-      date: date || new Date().toISOString().split('T')[0],
+      date: date || toDateKey(new Date()),
       start_time: '09:00',
       end_time: '18:00',
     }

@@ -304,7 +304,7 @@ watch(
   },
 )
 
-watch([profileView, canManageProducts, canManageRoles, canManageSchedule], ([view]) => {
+watch([profileView, canManageProducts, canManageRoles, canManageSchedule, isSuperAdmin], ([view]) => {
   if (view === 'assortment' && !canManageProducts.value) {
     profileView.value = 'main'
     return
@@ -321,6 +321,12 @@ watch([profileView, canManageProducts, canManageRoles, canManageSchedule], ([vie
     profileView.value = 'main'
   }
   if (view === 'employees' && !canManageSchedule.value) {
+    profileView.value = 'main'
+  }
+  if (view === 'broadcast' && !canManageSchedule.value) {
+    profileView.value = 'main'
+  }
+  if (view === 'audit' && !isSuperAdmin.value) {
     profileView.value = 'main'
   }
 })
@@ -414,6 +420,8 @@ onBeforeUnmount(() => {
           @open-schedule-template="profileView = 'schedule-template'"
           @open-employees="profileView = 'employees'"
           @open-roles="profileView = 'roles'"
+          @open-audit="profileView = 'audit'"
+          @open-broadcast="profileView = 'broadcast'"
           @logout="logout"
           @back-main="profileView = 'main'; resetProductForm()"
           @update-product-field="updateProductFormField"

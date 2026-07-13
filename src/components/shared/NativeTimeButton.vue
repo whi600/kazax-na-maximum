@@ -1,16 +1,14 @@
 <script setup>
-import { CalendarDays } from 'lucide-vue-next'
+import { Clock3 } from 'lucide-vue-next'
 import { useNativeInputPicker } from './useNativeInputPicker'
 
 defineProps({
   modelValue: { type: String, default: '' },
   label: { type: String, required: true },
-  displayValue: { type: String, default: '' },
-  min: { type: String, default: '' },
 })
 
 const emit = defineEmits(['update:modelValue'])
-const { input: dateInput, openPicker } = useNativeInputPicker()
+const { input: timeInput, openPicker } = useNativeInputPicker()
 </script>
 
 <template>
@@ -20,14 +18,13 @@ const { input: dateInput, openPicker } = useNativeInputPicker()
   >
     <span class="mb-1 text-[9px] font-black uppercase text-slate-400">{{ label }}</span>
     <span class="flex items-center justify-between gap-2 text-sm font-black text-slate-800">
-      <span class="truncate">{{ displayValue || 'Выберите дату' }}</span>
-      <CalendarDays class="h-4 w-4 shrink-0 text-blue-600" />
+      <span>{{ modelValue || '--:--' }}</span>
+      <Clock3 class="h-4 w-4 shrink-0 text-blue-600" />
     </span>
     <input
-      ref="dateInput"
-      type="date"
+      ref="timeInput"
+      type="time"
       :value="modelValue"
-      :min="min || undefined"
       :aria-label="label"
       class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
       @input="emit('update:modelValue', $event.target.value)"

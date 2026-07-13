@@ -21,11 +21,17 @@ export const useAppNavigation = ({
     if (activeTab.value === 'profile' && profileView.value === 'notifications') {
       return 'Уведомления'
     }
+    if (activeTab.value === 'profile' && profileView.value === 'broadcast') {
+      return 'Оповещение всем'
+    }
     if (activeTab.value === 'profile' && profileView.value === 'schedule-template') {
       return 'Базовое расписание'
     }
     if (activeTab.value === 'profile' && profileView.value === 'employees') {
       return 'Сотрудники'
+    }
+    if (activeTab.value === 'profile' && profileView.value === 'audit') {
+      return 'Журнал изменений'
     }
     if (activeTab.value === 'profile') return 'Профиль'
     return 'Отчет'

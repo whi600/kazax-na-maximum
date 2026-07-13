@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { recordsApi, shiftsApi } from '../../api'
 import {
   buildRecordsDaySections,
@@ -65,12 +65,6 @@ export const useArchiveData = (props) => {
   const selectedEmployee = ref('all')
   const periodStart = ref('')
   const periodEnd = ref('')
-  const recordsLoadMoreRef = ref(null)
-  const shiftsLoadMoreRef = ref(null)
-  const auditLoadMoreRef = ref(null)
-  const writeOffChartScrollerRef = ref(null)
-  let recordsLoadObserver = null
-
   const safeAlert = (message) => alert(message)
 
   const setDefaultPeriod = () => {
@@ -146,23 +140,6 @@ export const useArchiveData = (props) => {
     return list
   })
 
-  const selectedEmployeeName = computed(() => {
-    if (selectedEmployee.value === 'all') return 'Все сотрудники'
-    return selectedEmployee.value
-  })
-
-  const selectedEmployeeSummary = computed(
-    () => {
-      const total =
-        selectedEmployee.value === 'all'
-          ? shiftHistoryTotal.value || filteredShifts.value.length
-          : employees.value.find((employee) => employee.key === selectedEmployee.value)?.count ||
-            filteredShifts.value.length
-
-      return `${selectedEmployeeName.value}: ${total} смен`
-    },
-  )
-
   const periodShifts = computed(() =>
     hoursShifts.value
       .filter(
@@ -206,26 +183,6 @@ export const useArchiveData = (props) => {
     }
     if (periodStart.value) return `С ${formatDateLabel(periodStart.value)}`
     return `До ${formatDateLabel(periodEnd.value)}`
-  })
-
-  const archiveTabs = computed(() => {
-    const tabs = [
-      { key: 'records', label: 'Отчеты' },
-      { key: 'shiftHistory', label: 'История' },
-      { key: 'shiftHours', label: 'Часы' },
-    ]
-
-    if (props.canViewAudit) {
-      tabs.push({ key: 'writeOffs', label: 'Списания' })
-      tabs.push({ key: 'audit', label: 'Изменения' })
-    }
-
-    return tabs
-  })
-
-  const archiveViewIndex = computed(() => {
-    const index = archiveTabs.value.findIndex((tab) => tab.key === archiveView.value)
-    return index >= 0 ? index : 0
   })
 
   const formatDateTimeLabel = (value) => {
@@ -328,48 +285,6 @@ export const useArchiveData = (props) => {
   const loadMoreAudit = () => {
     if (!hasMoreAudit.value) return
     loadAudit({ append: true })
-  }
-
-  const reconnectRecordsObserver = async () => {
-    if (recordsLoadObserver) {
-      recordsLoadObserver.disconnect()
-    }
-
-    if (
-      typeof window === 'undefined' ||
-      (
-        (archiveView.value === 'records' && !hasMoreRecordDays.value) ||
-        (archiveView.value === 'shiftHistory' && !hasMoreShifts.value) ||
-        (archiveView.value === 'audit' && !hasMoreAudit.value) ||
-        (archiveView.value !== 'records' &&
-          archiveView.value !== 'shiftHistory' &&
-          archiveView.value !== 'audit')
-      )
-    ) {
-      return
-    }
-
-    await nextTick()
-    const target =
-      archiveView.value === 'records'
-        ? recordsLoadMoreRef.value
-        : archiveView.value === 'shiftHistory'
-          ? shiftsLoadMoreRef.value
-          : auditLoadMoreRef.value
-    if (!target) return
-
-    recordsLoadObserver = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          if (archiveView.value === 'records') loadMoreRecordDays()
-          if (archiveView.value === 'shiftHistory') loadMoreShifts()
-          if (archiveView.value === 'audit') loadMoreAudit()
-        }
-      },
-      { root: null, rootMargin: '120px 0px', threshold: 0.1 },
-    )
-
-    recordsLoadObserver.observe(target)
   }
 
   const loadShifts = async ({ append = false } = {}) => {
@@ -484,13 +399,29 @@ export const useArchiveData = (props) => {
     loadWriteOffAnalytics({ append: true })
   }
 
-  const handleWriteOffChartScroll = (event) => {
-    const target = event?.currentTarget
-    if (!target) return
+  const ensureViewLoaded = async (view) => {
+    if (view === 'records' && !recordsLoaded.value) {
+      await loadRecords()
+      return
+    }
 
-    const distanceToEnd = target.scrollWidth - target.clientWidth - target.scrollLeft
-    if (distanceToEnd < 80) {
-      loadMoreWriteOffDays()
+    if (view === 'shiftHistory' && !shiftsLoaded.value) {
+      await loadShifts()
+      return
+    }
+
+    if (view === 'shiftHours' && !hoursLoaded.value) {
+      await loadHoursShifts()
+      return
+    }
+
+    if (view === 'audit' && props.canViewAudit && !auditLoaded.value) {
+      await loadAudit()
+      return
+    }
+
+    if (view === 'writeOffs' && props.canViewAudit && !analyticsLoaded.value) {
+      await loadWriteOffAnalytics()
     }
   }
 
@@ -500,27 +431,7 @@ export const useArchiveData = (props) => {
       return
     }
 
-    if (view === 'records' && !recordsLoaded.value) {
-      await loadRecords()
-    }
-
-    if (view === 'shiftHistory' && !shiftsLoaded.value) {
-      await loadShifts()
-    }
-
-    if (view === 'shiftHours' && !hoursLoaded.value) {
-      await loadHoursShifts()
-    }
-
-    if (view === 'audit' && props.canViewAudit && !auditLoaded.value) {
-      await loadAudit()
-    }
-
-    if (view === 'writeOffs' && props.canViewAudit && !analyticsLoaded.value) {
-      await loadWriteOffAnalytics()
-    }
-
-    await reconnectRecordsObserver()
+    await ensureViewLoaded(view)
   })
 
   watch(
@@ -532,29 +443,15 @@ export const useArchiveData = (props) => {
     },
   )
 
-  watch(recordsDaySections, reconnectRecordsObserver)
-  watch(groupedShiftHistory, reconnectRecordsObserver)
-  watch(auditLogs, reconnectRecordsObserver)
-  watch(hasMoreRecordDays, reconnectRecordsObserver)
-  watch(hasMoreShifts, reconnectRecordsObserver)
-  watch(hasMoreAudit, reconnectRecordsObserver)
-
   onMounted(async () => {
     setDefaultPeriod()
-    await loadRecords()
-    if (props.lockedMode) {
-      archiveView.value = normalizeArchiveView(props.lockedMode)
-    }
-    if (!props.canViewAudit && archiveView.value === 'audit') {
+    if (
+      !props.canViewAudit &&
+      (archiveView.value === 'audit' || archiveView.value === 'writeOffs')
+    ) {
       archiveView.value = 'records'
     }
-    await reconnectRecordsObserver()
-  })
-
-  onBeforeUnmount(() => {
-    if (recordsLoadObserver) {
-      recordsLoadObserver.disconnect()
-    }
+    await ensureViewLoaded(archiveView.value)
   })
 
   return {
@@ -567,21 +464,14 @@ export const useArchiveData = (props) => {
     selectedEmployee,
     periodStart,
     periodEnd,
-    recordsLoadMoreRef,
-    shiftsLoadMoreRef,
-    auditLoadMoreRef,
-    writeOffChartScrollerRef,
     baseShifts,
     shiftHistoryTotal,
     employees,
     groupedShiftHistory,
-    selectedEmployeeSummary,
     periodShifts,
     periodEmployeeStats,
     periodTotalHours,
     periodLabel,
-    archiveTabs,
-    archiveViewIndex,
     recordsDaySections,
     hasMoreRecordDays,
     hasMoreShifts,
@@ -593,14 +483,16 @@ export const useArchiveData = (props) => {
     selectedWriteOffDate,
     selectedWriteOffLabel,
     loadWriteOffDetails,
-    handleWriteOffChartScroll,
+    loadMoreRecordDays,
+    loadMoreShifts,
+    loadMoreAudit,
+    loadMoreWriteOffDays,
     formatDateTimeLabel,
     formatAuditAction,
     formatAuditEntity,
     formatAuditSummary,
     formatDateLabel,
     formatHours,
-    formatShortDate,
     formatShiftDay,
     formatShiftWeekday,
   }

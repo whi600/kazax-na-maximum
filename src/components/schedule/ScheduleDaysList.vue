@@ -9,6 +9,7 @@ defineProps({
   canManageSchedule: { type: Boolean, default: false },
   canSelfCancel: { type: Function, required: true },
   isNewShift: { type: Function, required: true },
+  showMineOnly: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['book', 'cancel', 'edit', 'delete'])
@@ -33,10 +34,7 @@ const emit = defineEmits(['book', 'cancel', 'edit', 'delete'])
         class="border border-dashed rounded-lg p-4 text-center"
         :class="day.isPast ? 'bg-slate-100/70 border-slate-200' : 'bg-white/70 border-slate-100'"
       >
-        <p
-          class="text-[10px] font-black uppercase"
-          :class="day.isPast ? 'text-slate-300' : 'text-slate-300'"
-        >
+        <p class="text-[10px] font-black uppercase text-slate-300">
           {{ formatWeekDay(day.date) }} свободен
         </p>
       </div>
@@ -62,8 +60,13 @@ const emit = defineEmits(['book', 'cancel', 'edit', 'delete'])
     </div>
   </TransitionGroup>
 
-  <div v-if="approvedCount === 0" class="text-center py-20 opacity-20 schedule-fade">
+  <div
+    v-if="approvedCount === 0 || (showMineOnly && days.length === 0)"
+    class="text-center py-20 opacity-20 schedule-fade"
+  >
     <Calendar class="w-12 h-12 mx-auto mb-2" />
-    <p class="text-xs font-black uppercase">График не заполнен</p>
+    <p class="text-xs font-black uppercase">
+      {{ showMineOnly ? 'У вас нет смен на этой неделе' : 'График не заполнен' }}
+    </p>
   </div>
 </template>

@@ -544,6 +544,7 @@ onBeforeUnmount(() => {
           :can-manage-schedule="canManageSchedule"
           :can-self-cancel="canSelfCancelBooking"
           :is-new-shift="isNewShift"
+          :show-mine-only="showMineOnly"
           @book="handleBookClick"
           @cancel="cancelBooking"
           @edit="openEditModal"

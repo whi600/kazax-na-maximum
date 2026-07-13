@@ -4,6 +4,7 @@ import {
   addDays,
   createDefaultWeekTemplate,
   DEFAULT_WEEK_TEMPLATE_SHIFTS,
+  getShiftDurationHours,
   getCurrentWeekStart,
   getNextWeekStart,
   getWeekStart,
@@ -118,16 +119,10 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
         ),
       ).sort()
 
-      const firstApprovedShift = shifts.value
-        .filter((shift) => (shift.status || 'approved') === 'approved')
-        .sort((a, b) =>
-          `${a.date}T${a.start_time}`.localeCompare(`${b.date}T${b.start_time}`),
-        )[0]
-
       if (previousWeekStart && availableWeeks.includes(previousWeekStart)) {
         selectedWeekStart.value = previousWeekStart
-      } else if (firstApprovedShift) {
-        selectedWeekStart.value = getWeekStart(firstApprovedShift.date)
+      } else if (availableWeeks.length > 0) {
+        selectedWeekStart.value = availableWeeks[0]
       } else {
         selectedWeekStart.value = currentWeekStart
       }
@@ -184,7 +179,9 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
   })
 
   const selectedWeekDays = computed(() => {
-    const weekStart = selectedWeekStart.value || weekStarts.value[0] || getCurrentWeekStart()
+    const weekStart = weekStarts.value.includes(selectedWeekStart.value)
+      ? selectedWeekStart.value
+      : weekStarts.value[0] || getCurrentWeekStart()
     const start = parseDate(weekStart)
 
     return Array.from({ length: 7 }, (_, index) => {
@@ -205,16 +202,18 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
   const visibleSelectedWeekDays = computed(() => {
     if (!showMineOnly.value) return selectedWeekDays.value
 
-    return selectedWeekDays.value.map((day) => {
-      const shiftsForUser = day.shifts.filter((shift) => isCurrentUserShift(shift))
-      const occupiedCount = shiftsForUser.filter((shift) => shift.employee_name).length
-      return {
-        ...day,
-        shifts: shiftsForUser,
-        occupiedCount,
-        openCount: shiftsForUser.length - occupiedCount,
-      }
-    })
+    return selectedWeekDays.value
+      .map((day) => {
+        const shiftsForUser = day.shifts.filter((shift) => isCurrentUserShift(shift))
+        const occupiedCount = shiftsForUser.filter((shift) => shift.employee_name).length
+        return {
+          ...day,
+          shifts: shiftsForUser,
+          occupiedCount,
+          openCount: shiftsForUser.length - occupiedCount,
+        }
+      })
+      .filter((day) => day.shifts.length > 0)
   })
 
   const selectedWeekStats = computed(() => {
@@ -229,8 +228,16 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
         day.shifts.filter((shift) => isCurrentUserShift(shift)).length,
       0,
     )
+    const myHours = selectedWeekDays.value.reduce(
+      (sum, day) =>
+        sum +
+        day.shifts
+          .filter((shift) => isCurrentUserShift(shift))
+          .reduce((hours, shift) => hours + getShiftDurationHours(shift), 0),
+      0,
+    )
 
-    return { shiftsCount, openCount, myCount }
+    return { shiftsCount, openCount, myCount, myHours }
   })
 
   const pendingRequests = computed(() =>

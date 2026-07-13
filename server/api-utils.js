@@ -1,4 +1,11 @@
 import { buildPushPayload, notifyUsers } from './notifications.js'
+import {
+  getCurrentWeekStartDate,
+  getRetentionStartDate,
+  getToday,
+} from './date-utils.js'
+
+export { getCurrentWeekStartDate, getRetentionStartDate, getToday }
 
 export const toShiftDto = (row) => ({
   id: row.id,
@@ -8,23 +15,6 @@ export const toShiftDto = (row) => ({
   employee_name: row.employee_name,
   status: row.status || 'approved',
 })
-
-export const getToday = () => new Date().toISOString().slice(0, 10)
-
-export const getRetentionStartDate = (days) => {
-  const date = new Date()
-  date.setUTCDate(date.getUTCDate() - (Math.max(1, Number(days) || 1) - 1))
-  return date.toISOString().slice(0, 10)
-}
-
-export const getCurrentWeekStartDate = () => {
-  const today = new Date()
-  const day = today.getDay() || 7
-  const monday = new Date(today)
-  monday.setHours(0, 0, 0, 0)
-  monday.setDate(today.getDate() - (day - 1))
-  return monday.toISOString().slice(0, 10)
-}
 
 export const isValidShiftRange = (startTime, endTime) =>
   Boolean(startTime && endTime && startTime < endTime)

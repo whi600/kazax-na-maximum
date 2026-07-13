@@ -5,7 +5,6 @@ import {
   getUserPermissions,
   hashPassword,
   isSuperAdminUser,
-  normalizeRole,
   requireUser,
   sanitizeUser,
   setSessionCookie,
@@ -44,10 +43,7 @@ export const handleAuthRoutes = async ({ req, res, pathname, adminEmails }) => {
     }
 
     const usersCount = (await getUsersCountStatement.get()).count
-    const role =
-      usersCount === 0 || adminEmails.has(email)
-        ? 'admin'
-        : normalizeRole(body.role)
+    const role = usersCount === 0 || adminEmails.has(email) ? 'admin' : 'employee'
 
     const name = displayName || email.split('@')[0] || 'Сотрудник'
     const passwordHash = hashPassword(password)

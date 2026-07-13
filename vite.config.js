@@ -7,10 +7,6 @@ export default defineConfig({
   plugins: [vue(), tailwindcss()],
   server: {
     host: '0.0.0.0',
-    hmr: {
-      host: 'localhost',
-      clientPort: 5173,
-    },
     proxy: {
       '/api': {
         target: 'http://localhost:8787',

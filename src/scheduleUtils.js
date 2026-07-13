@@ -75,6 +75,24 @@ export const isPastDate = (dateStr) => {
   return dateStr < today
 }
 
+export const getShiftDurationHours = (shift) => {
+  const parseTime = (value) => {
+    const normalized = String(value || '')
+    if (!/^\d{2}:\d{2}$/.test(normalized)) return null
+
+    const [hours, minutes] = normalized.split(':').map(Number)
+    if (hours > 23 || minutes > 59) return null
+    return hours * 60 + minutes
+  }
+
+  const start = parseTime(shift?.start_time)
+  let end = parseTime(shift?.end_time)
+  if (start === null || end === null) return 0
+  if (end <= start) return 0
+
+  return Math.max(0, (end - start) / 60)
+}
+
 export const DEFAULT_WEEK_TEMPLATE_SHIFTS = [
   { day_index: 0, start_time: '09:00', end_time: '15:00' },
   { day_index: 0, start_time: '14:00', end_time: '21:00' },
