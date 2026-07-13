@@ -64,6 +64,20 @@ export const getResourceRevision = async (resource, client = null) => {
   return Number(state?.revision || 0)
 }
 
+export const withResourceMutation = async ({ database, user, resource, execute }) =>
+  database.transaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `resource:${resource}`,
+    ])
+    const value = await execute(client)
+    const state = await upsertResourceStateStatement.getOn(
+      client,
+      resource,
+      user.name || user.email || 'system',
+    )
+    return { value, revision: Number(state?.revision || 0) }
+  })
+
 export const withVersionedMutation = async ({
   database,
   user,
@@ -75,6 +89,11 @@ export const withVersionedMutation = async ({
   const requestHash = hashPayload(payload)
 
   return database.transaction(async (client) => {
+    // Serialize mutations of one logical resource so revision checking and writing
+    // remain one atomic decision even under concurrent PostgreSQL transactions.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `resource:${resource}`,
+    ])
     if (meta.operationId) {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [meta.operationId])
       const stored = await getOperationResultStatement.getOn(client, meta.operationId)

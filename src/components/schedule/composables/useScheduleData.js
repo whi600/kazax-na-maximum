@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { shiftsApi } from '../../../api'
+import { createOperationId } from '../../../utils/operationId'
 import {
   addDays,
   createDefaultWeekTemplate,
@@ -17,6 +18,7 @@ const DEFAULT_WEEKS_BOOTSTRAP_KEY = 'kofeyny:default-weeks-bootstrap:v1'
 
 export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAlert }) => {
   const shifts = ref([])
+  const scheduleRevision = ref(0)
   const loading = ref(true)
   const scheduleTemplateShifts = ref([])
   const selectedWeekStart = ref('')
@@ -78,6 +80,7 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
       const previousWeekStart = selectedWeekStart.value
       const response = await shiftsApi.upcoming()
       shifts.value = response.shifts || []
+      scheduleRevision.value = Number(response.revision || 0)
       unbookRequests.value = response.unbookRequests || []
 
       const approvedServerShifts = shifts.value.filter(
@@ -97,14 +100,18 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
           ...createDefaultWeekTemplate(nextWeek, scheduleTemplateShifts.value),
         ]
 
-        await shiftsApi.bulkSave({
-          deletedIds: [],
-          newShifts: defaults,
-        })
+        await shiftsApi.bulkSave(
+          { deletedIds: [], newShifts: defaults },
+          {
+            operationId: createOperationId(),
+            baseRevision: scheduleRevision.value,
+          },
+        )
 
         markDefaultWeeksBootstrapped()
         const refreshed = await shiftsApi.upcoming()
         shifts.value = refreshed.shifts || []
+        scheduleRevision.value = Number(refreshed.revision || scheduleRevision.value + 1)
       } else if (approvedServerShifts.length > 0) {
         markDefaultWeeksBootstrapped()
       }
@@ -259,6 +266,7 @@ export const useScheduleData = ({ canManageSchedule, isCurrentUserShift, safeAle
 
   return {
     shifts,
+    scheduleRevision,
     loading,
     scheduleTemplateShifts,
     selectedWeekStart,

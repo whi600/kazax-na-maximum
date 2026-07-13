@@ -2,6 +2,7 @@ import {
   insertAuditLogStatement,
   upsertResourceStateStatement,
 } from './statements.js'
+import { db } from './db.js'
 
 const editableResources = new Set(['schedule', 'assortment'])
 
@@ -55,8 +56,14 @@ export const logAudit = async ({
 
 export const touchResource = async (resource, actorUser) => {
   if (!isEditableResource(resource)) return
-  return upsertResourceStateStatement.get(
-    resource,
-    actorUser?.name || actorUser?.email || 'system',
-  )
+  return db.transaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `resource:${resource}`,
+    ])
+    return upsertResourceStateStatement.getOn(
+      client,
+      resource,
+      actorUser?.name || actorUser?.email || 'system',
+    )
+  })
 }

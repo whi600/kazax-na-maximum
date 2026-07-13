@@ -191,6 +191,120 @@ describe('auth and API boundaries', () => {
     expect(loaded.payload.entries[0].remainder).toBe(4)
   })
 
+  it('serializes concurrent schedule writes and rejects the stale request', async () => {
+    const upcoming = await request('/api/shifts/upcoming', { cookie: superAdmin.cookie })
+    expect(upcoming.response.status).toBe(200)
+    const baseRevision = upcoming.payload.revision
+    const date = new Date()
+    date.setDate(date.getDate() + 14)
+    const dateKey = [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-')
+
+    const writes = await Promise.all([
+      request('/api/shifts/bulk-save', {
+        method: 'POST',
+        cookie: superAdmin.cookie,
+        body: {
+          deletedIds: [],
+          newShifts: [{ date: dateKey, start_time: '09:00', end_time: '12:00' }],
+          operationId: 'schedule-bulk-0001',
+          baseRevision,
+        },
+      }),
+      request('/api/shifts/bulk-save', {
+        method: 'POST',
+        cookie: superAdmin.cookie,
+        body: {
+          deletedIds: [],
+          newShifts: [{ date: dateKey, start_time: '13:00', end_time: '16:00' }],
+          operationId: 'schedule-bulk-0002',
+          baseRevision,
+        },
+      }),
+    ])
+
+    expect(writes.map(({ response }) => response.status).sort()).toEqual([200, 409])
+    const successful = writes.find(({ response }) => response.status === 200)
+    const stale = writes.find(({ response }) => response.status === 409)
+    expect(successful.payload.revision).toBe(baseRevision + 1)
+    expect(stale.payload).toMatchObject({
+      code: 'REVISION_CONFLICT',
+      details: { currentRevision: baseRevision + 1 },
+    })
+
+    const replay = await request('/api/shifts/bulk-save', {
+      method: 'POST',
+      cookie: superAdmin.cookie,
+      body: successful === writes[0]
+        ? {
+            deletedIds: [],
+            newShifts: [{ date: dateKey, start_time: '09:00', end_time: '12:00' }],
+            operationId: 'schedule-bulk-0001',
+            baseRevision,
+          }
+        : {
+            deletedIds: [],
+            newShifts: [{ date: dateKey, start_time: '13:00', end_time: '16:00' }],
+            operationId: 'schedule-bulk-0002',
+            baseRevision,
+          },
+    })
+    expect(replay.payload).toEqual(successful.payload)
+
+    const createdShiftId = successful.payload.createdIds[0]
+    const [booking, deletion] = await Promise.all([
+      request(`/api/shifts/${createdShiftId}/book`, {
+        method: 'PATCH',
+        cookie: employee.cookie,
+      }),
+      request('/api/shifts/bulk-save', {
+        method: 'POST',
+        cookie: superAdmin.cookie,
+        body: {
+          deletedIds: [createdShiftId],
+          newShifts: [],
+          operationId: 'schedule-bulk-delete-0001',
+          baseRevision: successful.payload.revision,
+        },
+      }),
+    ])
+    expect([booking.response.status, deletion.response.status]).not.toEqual([200, 200])
+    expect([booking.response.status, deletion.response.status]).toContain(200)
+  })
+
+  it('versions the default schedule template independently', async () => {
+    const loaded = await request('/api/schedule-template', { cookie: superAdmin.cookie })
+    const saved = await request('/api/schedule-template', {
+      method: 'PUT',
+      cookie: superAdmin.cookie,
+      body: {
+        shifts: loaded.payload.shifts.map(({ day_index, start_time, end_time }) => ({
+          day_index,
+          start_time,
+          end_time,
+        })),
+        operationId: 'schedule-template-0001',
+        baseRevision: loaded.payload.revision,
+      },
+    })
+    expect(saved.response.status).toBe(200)
+    expect(saved.payload.revision).toBe(loaded.payload.revision + 1)
+
+    const stale = await request('/api/schedule-template', {
+      method: 'PUT',
+      cookie: superAdmin.cookie,
+      body: {
+        shifts: [],
+        operationId: 'schedule-template-0002',
+        baseRevision: loaded.payload.revision,
+      },
+    })
+    expect(stale.response.status).toBe(409)
+  })
+
   it('returns a client error for malformed JSON', async () => {
     const response = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',

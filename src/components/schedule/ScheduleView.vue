@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { shiftsApi } from '../../api'
+import { ApiError, shiftsApi } from '../../api'
+import { createOperationId } from '../../utils/operationId'
 import {
   formatDateHeader,
   formatDateInput,
@@ -20,6 +21,7 @@ import ScheduleShiftModal from './ScheduleShiftModal.vue'
 import ScheduleSaveStatus from './ScheduleSaveStatus.vue'
 import ScheduleWeekDeleteConfirm from './ScheduleWeekDeleteConfirm.vue'
 import ScheduleWeekControls from './ScheduleWeekControls.vue'
+import DataConflictDialog from '../shared/conflicts/DataConflictDialog.vue'
 import { useScheduleBooking } from './composables/useScheduleBooking'
 import { useScheduleData } from './composables/useScheduleData'
 import { useOverlayScrollLock } from './composables/useOverlayScrollLock'
@@ -44,7 +46,9 @@ const emit = defineEmits(['pending-count'])
 const showPendingSheet = ref(false)
 
 const isSaving = ref(false)
+const scheduleMutationBusy = ref(false)
 const structureSaveStatus = ref('idle')
+const scheduleConflict = ref(null)
 let structureStatusHideTimer = null
 let structureAutosaveTimer = null
 let suppressStructureAutosave = false
@@ -71,6 +75,7 @@ const clearStructureAutosave = () => {
 }
 const {
   shifts,
+  scheduleRevision,
   loading,
   scheduleTemplateShifts,
   selectedWeekStart,
@@ -169,6 +174,7 @@ const {
   props,
   canManageSchedule,
   shifts,
+  scheduleRevision,
   saveStructure: (...args) => saveStructure(...args),
   fetchShifts: (...args) => fetchShifts(...args),
   markShiftInteracted,
@@ -208,6 +214,43 @@ const addNextWeekTemplate = () => {
 
   unsavedNewShifts.value.push(...missing.map(makeTempShift))
   selectedWeekStart.value = nextWeek
+}
+
+const savePersistedShift = async (
+  shiftId,
+  payload,
+  { force = false, baseRevision } = {},
+) => {
+  scheduleMutationBusy.value = true
+  try {
+    const response = await shiftsApi.update(shiftId, payload, {
+      operationId: createOperationId(),
+      baseRevision: baseRevision ?? scheduleRevision.value,
+      force,
+    })
+    scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
+    await fetchShifts()
+    selectedWeekStart.value = getWeekStart(payload.date)
+    scheduleConflict.value = null
+    setStructureSaveStatus('saved')
+    closeModal()
+    return true
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'REVISION_CONFLICT') {
+      scheduleConflict.value = {
+        title: 'Смена уже изменена на другом устройстве',
+        message: 'Загрузите актуальный график или сохраните выбранные дату и время поверх него.',
+        baseRevision: baseRevision ?? scheduleRevision.value,
+        currentRevision: Number(error.details?.currentRevision || 0),
+        retry: (options) => savePersistedShift(shiftId, payload, options),
+      }
+    } else {
+      safeAlert(error?.message || 'Не удалось обновить смену')
+    }
+    return false
+  } finally {
+    scheduleMutationBusy.value = false
+  }
 }
 
 defineExpose({
@@ -258,15 +301,7 @@ const handleSaveModal = async () => {
       return
     }
 
-    try {
-      await shiftsApi.update(shiftId, form.value)
-      await fetchShifts()
-      selectedWeekStart.value = getWeekStart(form.value.date)
-      setStructureSaveStatus('saved')
-      closeModal()
-    } catch (error) {
-      safeAlert(error?.message || 'Не удалось обновить смену')
-    }
+    await savePersistedShift(shiftId, { ...form.value })
     return
   }
 
@@ -313,13 +348,15 @@ const markForDeletion = (shift) => {
 const approveRequest = async (shift) => {
   try {
     if (shift.type === 'unbook') {
-      await shiftsApi.approveUnbookRequest(shift.id)
+      const response = await shiftsApi.approveUnbookRequest(shift.id)
+      scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
       await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
       if (pendingRequests.value.length === 0) showPendingSheet.value = false
       return
     }
 
-    await shiftsApi.approve(shift.id)
+    const response = await shiftsApi.approve(shift.id)
+    scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
     shift.status = 'approved'
     if (pendingRequests.value.length === 0) showPendingSheet.value = false
   } catch (error) {
@@ -330,13 +367,15 @@ const approveRequest = async (shift) => {
 const rejectRequest = async (request) => {
   try {
     if (request?.type === 'unbook') {
-      await shiftsApi.rejectUnbookRequest(request.id)
+      const response = await shiftsApi.rejectUnbookRequest(request.id)
+      scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
       await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
       if (pendingRequests.value.length === 0) showPendingSheet.value = false
       return
     }
 
-    await shiftsApi.remove(request.id)
+    const response = await shiftsApi.remove(request.id)
+    scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
     shifts.value = shifts.value.filter((shift) => shift.id !== request.id)
     if (pendingRequests.value.length === 0) showPendingSheet.value = false
   } catch (error) {
@@ -351,11 +390,13 @@ const hasStructureChanges = computed(
 const getDraftShiftKey = (shift) =>
   `${shift?.date || ''}|${shift?.start_time || ''}|${shift?.end_time || ''}`
 
-const saveStructure = async ({ silent = false } = {}) => {
+const saveStructure = async ({ silent = false, force = false, baseRevision } = {}) => {
   if (!hasStructureChanges.value) return true
   if (isSaving.value) return false
+  if (scheduleConflict.value && !force) return false
   isSaving.value = true
   setStructureSaveStatus('saving')
+  let saveSucceeded = false
 
   const savedDeleteIds = [...pendingDeleteIds.value]
   const savedTempIds = unsavedNewShifts.value.map((shift) => shift.id)
@@ -369,10 +410,16 @@ const saveStructure = async ({ silent = false } = {}) => {
   }))
 
   try {
-    const response = await shiftsApi.bulkSave({
-      deletedIds: savedDeleteIds,
-      newShifts: savedNewShifts,
-    })
+    const mutationBaseRevision = baseRevision ?? scheduleRevision.value
+    const response = await shiftsApi.bulkSave(
+      { deletedIds: savedDeleteIds, newShifts: savedNewShifts },
+      {
+        operationId: createOperationId(),
+        baseRevision: mutationBaseRevision,
+        force,
+      },
+    )
+    scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
 
     pendingDeleteIds.value = pendingDeleteIds.value.filter(
       (id) => !savedDeleteIds.includes(id),
@@ -396,17 +443,45 @@ const saveStructure = async ({ silent = false } = {}) => {
       recentNewShiftIds.value = Array.from(new Set([...existing, ...createdIds]))
     }
     setStructureSaveStatus('saved')
+    scheduleConflict.value = null
+    saveSucceeded = true
     return true
   } catch (error) {
     setStructureSaveStatus('error')
-    if (!silent) safeAlert(error?.message || 'Не удалось сохранить изменения')
+    if (error instanceof ApiError && error.code === 'REVISION_CONFLICT') {
+      scheduleConflict.value = {
+        title: 'График изменен на другом устройстве',
+        message: 'Загрузите актуальный график или сохраните свои изменения поверх него.',
+        baseRevision: baseRevision ?? scheduleRevision.value,
+        currentRevision: Number(error.details?.currentRevision || 0),
+        retry: (options) => saveStructure({ silent: true, ...options }),
+      }
+    } else if (!silent) {
+      safeAlert(error?.message || 'Не удалось сохранить изменения')
+    }
     return false
   } finally {
     isSaving.value = false
-    if (hasStructureChanges.value && !suppressStructureAutosave) {
+    if (saveSucceeded && hasStructureChanges.value && !suppressStructureAutosave) {
       saveStructure({ silent: true })
     }
   }
+}
+
+const reloadScheduleConflict = async () => {
+  scheduleConflict.value = null
+  closeModal()
+  pendingDeleteIds.value = []
+  unsavedNewShifts.value = []
+  await fetchShifts({ skipDefaultBootstrap: true })
+  setStructureSaveStatus('idle')
+}
+
+const forceScheduleConflict = async () => {
+  const conflict = scheduleConflict.value
+  if (!conflict) return
+  scheduleConflict.value = null
+  await conflict.retry({ force: true, baseRevision: conflict.baseRevision })
 }
 
 const {
@@ -426,6 +501,7 @@ const {
   unsavedNewShifts,
   weekStarts,
   selectedWeekStart,
+  scheduleRevision,
   isSaving,
   hasStructureChanges,
   fetchShifts,
@@ -435,6 +511,9 @@ const {
   setSuppressStructureAutosave,
   clearStructureAutosave,
   safeAlert,
+  setScheduleConflict: (conflict) => {
+    scheduleConflict.value = conflict
+  },
 })
 
 watch(
@@ -557,6 +636,13 @@ onBeforeUnmount(() => {
       v-if="canManageSchedule && structureSaveLabel"
       :label="structureSaveLabel"
       :status-class="structureSaveClass"
+    />
+
+    <DataConflictDialog
+      :conflict="scheduleConflict"
+      :busy="isSaving || isDeletingWeek || scheduleMutationBusy"
+      @reload="reloadScheduleConflict"
+      @force="forceScheduleConflict"
     />
 
     <ScheduleShiftModal

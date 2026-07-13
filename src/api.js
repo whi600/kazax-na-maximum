@@ -138,34 +138,41 @@ export const shiftsApi = {
     apiRequest(`/api/shifts/archive?limit=${limit}&offset=${offset}`, { method: 'GET' }),
   assignableUsers: () => apiRequest('/api/shifts/assignable-users', { method: 'GET' }),
   template: () => apiRequest('/api/schedule-template', { method: 'GET' }),
-  updateTemplate: (shifts) =>
+  updateTemplate: (shifts, meta) =>
     apiRequest('/api/schedule-template', {
       method: 'PUT',
-      body: JSON.stringify({ shifts }),
+      body: JSON.stringify(withMutationMeta({ shifts }, meta)),
     }),
   requestHelp: (payload) =>
     apiRequest('/api/shifts/help-request', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  createByAdmin: (payload) =>
+  createByAdmin: (payload, meta) =>
     apiRequest('/api/shifts/admin-create', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withMutationMeta(payload, meta)),
     }),
-  bulkSave: ({ deletedIds, newShifts }) =>
+  bulkSave: ({ deletedIds, newShifts }, meta) =>
     apiRequest('/api/shifts/bulk-save', {
       method: 'POST',
-      body: JSON.stringify({ deletedIds, newShifts }),
+      body: JSON.stringify(withMutationMeta({ deletedIds, newShifts }, meta)),
     }),
-  deleteWeek: (weekStart) =>
+  deleteWeek: (weekStart, meta = {}) =>
     apiRequest(`/api/shifts/week/${encodeURIComponent(weekStart)}`, {
       method: 'DELETE',
+      headers: {
+        ...(meta.operationId ? { 'X-Operation-Id': meta.operationId } : {}),
+        ...(meta.baseRevision !== undefined && meta.baseRevision !== null
+          ? { 'X-Base-Revision': String(meta.baseRevision) }
+          : {}),
+        ...(meta.force ? { 'X-Force-Write': '1' } : {}),
+      },
     }),
-  update: (id, payload) =>
+  update: (id, payload, meta) =>
     apiRequest(`/api/shifts/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withMutationMeta(payload, meta)),
     }),
   book: (id) => apiRequest(`/api/shifts/${id}/book`, { method: 'PATCH' }),
   assign: (id, userId) =>

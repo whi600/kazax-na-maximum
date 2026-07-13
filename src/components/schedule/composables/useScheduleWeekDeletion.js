@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
-import { shiftsApi } from '../../../api'
+import { ApiError, shiftsApi } from '../../../api'
+import { createOperationId } from '../../../utils/operationId'
 import {
   formatWeekRange,
   getCurrentWeekStart,
@@ -12,6 +13,7 @@ export const useScheduleWeekDeletion = ({
   unsavedNewShifts,
   weekStarts,
   selectedWeekStart,
+  scheduleRevision,
   isSaving,
   hasStructureChanges,
   fetchShifts,
@@ -21,6 +23,7 @@ export const useScheduleWeekDeletion = ({
   setSuppressStructureAutosave,
   clearStructureAutosave,
   safeAlert,
+  setScheduleConflict,
 }) => {
   const pendingWeekDeleteStart = ref('')
   const isDeletingWeek = ref(false)
@@ -105,7 +108,7 @@ export const useScheduleWeekDeletion = ({
     pendingWeekDeleteStart.value = ''
   }
 
-  const deleteWeek = async (weekStart) => {
+  const deleteWeek = async (weekStart, { force = false, baseRevision } = {}) => {
     if (!canManageSchedule.value || !weekStart || isDeletingWeek.value) return
 
     markDefaultWeeksBootstrapped()
@@ -117,6 +120,7 @@ export const useScheduleWeekDeletion = ({
     const previousSelectedWeekStart = selectedWeekStart.value
     const previousShifts = [...shifts.value]
     const previousUnsavedNewShifts = [...unsavedNewShifts.value]
+    let failedWithConflict = false
 
     setSuppressStructureAutosave(true)
 
@@ -137,7 +141,12 @@ export const useScheduleWeekDeletion = ({
       }
 
       if (currentWeekServerShifts.length > 0) {
-        await shiftsApi.deleteWeek(weekStart)
+        const response = await shiftsApi.deleteWeek(weekStart, {
+          operationId: createOperationId(),
+          baseRevision: baseRevision ?? scheduleRevision.value,
+          force,
+        })
+        scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
       }
 
       await fetchShifts({ preserveDrafts: true, skipDefaultBootstrap: true })
@@ -147,9 +156,20 @@ export const useScheduleWeekDeletion = ({
       shifts.value = previousShifts
       unsavedNewShifts.value = previousUnsavedNewShifts
       selectedWeekStart.value = previousSelectedWeekStart
-      safeAlert(error?.message || 'Не удалось удалить неделю. Попробуйте еще раз')
+      if (error instanceof ApiError && error.code === 'REVISION_CONFLICT') {
+        failedWithConflict = true
+        setScheduleConflict({
+          title: 'График изменен на другом устройстве',
+          message: 'Загрузите актуальный график или повторите удаление недели поверх него.',
+          baseRevision: baseRevision ?? scheduleRevision.value,
+          currentRevision: Number(error.details?.currentRevision || 0),
+          retry: (options) => deleteWeek(weekStart, options),
+        })
+      } else {
+        safeAlert(error?.message || 'Не удалось удалить неделю. Попробуйте еще раз')
+      }
     } finally {
-      const shouldResumeAutosave = hasStructureChanges.value
+      const shouldResumeAutosave = hasStructureChanges.value && !failedWithConflict
       setSuppressStructureAutosave(false)
       isDeletingWeek.value = false
       window.setTimeout(() => {

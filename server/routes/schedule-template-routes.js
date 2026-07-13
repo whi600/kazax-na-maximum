@@ -1,5 +1,5 @@
 import { requirePermission, requireUser } from '../auth.js'
-import { logAudit, touchResource } from '../audit.js'
+import { logAudit } from '../audit.js'
 import { badRequest, json, readJsonBody } from '../http.js'
 import {
   deleteScheduleTemplateShiftsStatement,
@@ -7,6 +7,13 @@ import {
   listScheduleTemplateShiftsStatement,
 } from '../statements.js'
 import { isValidShiftRange } from '../api-utils.js'
+import {
+  getResourceRevision,
+  parseMutationMeta,
+  withVersionedMutation,
+} from '../services/mutation-service.js'
+
+const RESOURCE = 'schedule_template'
 
 const toTemplateDto = (row) => ({
   id: row.id,
@@ -49,7 +56,10 @@ export const handleScheduleTemplateRoutes = async ({ req, res, pathname, db }) =
     if (!user) return true
 
     const rows = await listScheduleTemplateShiftsStatement.all()
-    json(res, 200, { shifts: rows.map(toTemplateDto) })
+    json(res, 200, {
+      shifts: rows.map(toTemplateDto),
+      revision: await getResourceRevision(RESOURCE),
+    })
     return true
   }
 
@@ -59,39 +69,51 @@ export const handleScheduleTemplateRoutes = async ({ req, res, pathname, db }) =
     const { user } = access
 
     const body = await readJsonBody(req)
+    const meta = parseMutationMeta(req, body)
     const normalized = normalizeTemplateShifts(body.shifts)
     if (!normalized) {
       badRequest(res, 'Проверьте дни и время смен')
       return true
     }
 
-    const before = (await listScheduleTemplateShiftsStatement.all()).map(toTemplateDto)
-
-    await db.transaction(async (client) => {
-      await deleteScheduleTemplateShiftsStatement.runOn(client)
-      for (const shift of normalized) {
-        await insertScheduleTemplateShiftStatement.runOn(
+    const result = await withVersionedMutation({
+      database: db,
+      user,
+      resource: RESOURCE,
+      meta,
+      payload: { action: 'update', shifts: normalized },
+      execute: async (client, { currentRevision }) => {
+        const before = (await listScheduleTemplateShiftsStatement.allOn(client))
+          .map(toTemplateDto)
+        await deleteScheduleTemplateShiftsStatement.runOn(client)
+        for (const shift of normalized) {
+          await insertScheduleTemplateShiftStatement.runOn(
+            client,
+            shift.day_index,
+            shift.start_time,
+            shift.end_time,
+            shift.sort_order,
+          )
+        }
+        const rows = await listScheduleTemplateShiftsStatement.allOn(client)
+        const forced = meta.force && meta.baseRevision !== currentRevision
+        await logAudit({
+          actorUser: user,
+          entityType: 'schedule_template',
+          action: 'schedule_template.update',
+          before,
+          after: { shifts: normalized },
+          context: {
+            count: normalized.length,
+            ...(forced ? { conflictResolution: 'force' } : {}),
+          },
           client,
-          shift.day_index,
-          shift.start_time,
-          shift.end_time,
-          shift.sort_order,
-        )
-      }
+        })
+        return { payload: { shifts: rows.map(toTemplateDto) } }
+      },
     })
 
-    await touchResource('schedule', user)
-    await logAudit({
-      actorUser: user,
-      entityType: 'schedule_template',
-      action: 'schedule_template.update',
-      before,
-      after: { shifts: normalized },
-      context: { count: normalized.length },
-    })
-
-    const rows = await listScheduleTemplateShiftsStatement.all()
-    json(res, 200, { shifts: rows.map(toTemplateDto) })
+    json(res, result.statusCode, result.payload)
     return true
   }
 

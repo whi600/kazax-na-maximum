@@ -1,8 +1,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ArrowLeft, Check, Plus, RotateCw, Trash2 } from 'lucide-vue-next'
-import { shiftsApi } from '../../api'
+import { ApiError, shiftsApi } from '../../api'
+import { createOperationId } from '../../utils/operationId'
 import NativeTimeButton from '../shared/NativeTimeButton.vue'
+import DataConflictDialog from '../shared/conflicts/DataConflictDialog.vue'
 import {
   DEFAULT_WEEK_TEMPLATE_SHIFTS,
   normalizeTemplateShift,
@@ -25,6 +27,8 @@ const selectedDay = ref(0)
 const templateShifts = ref([])
 const loading = ref(true)
 const saving = ref(false)
+const templateRevision = ref(0)
+const templateConflict = ref(null)
 const statusText = ref('')
 let tempId = -1
 
@@ -66,6 +70,7 @@ const loadTemplate = async () => {
   try {
     const response = await shiftsApi.template()
     templateShifts.value = (response.shifts || []).map(makeLocalShift)
+    templateRevision.value = Number(response.revision || 0)
   } catch (error) {
     setStatus(error?.message || 'Не удалось загрузить шаблон')
   } finally {
@@ -117,20 +122,47 @@ const validatePayload = (payload) => {
   return false
 }
 
-const saveTemplate = async () => {
+const saveTemplate = async ({ force = false, baseRevision } = {}) => {
   const payload = buildPayload()
   if (!validatePayload(payload)) return
 
   saving.value = true
   try {
-    const response = await shiftsApi.updateTemplate(payload)
+    const response = await shiftsApi.updateTemplate(payload, {
+      operationId: createOperationId(),
+      baseRevision: baseRevision ?? templateRevision.value,
+      force,
+    })
     templateShifts.value = (response.shifts || []).map(makeLocalShift)
+    templateRevision.value = Number(response.revision || templateRevision.value + 1)
+    templateConflict.value = null
     setStatus('Базовое расписание сохранено')
   } catch (error) {
-    setStatus(error?.message || 'Не удалось сохранить шаблон')
+    if (error instanceof ApiError && error.code === 'REVISION_CONFLICT') {
+      templateConflict.value = {
+        title: 'Базовое расписание уже изменили',
+        message: 'Загрузите актуальный шаблон или сохраните свой вариант поверх него.',
+        baseRevision: baseRevision ?? templateRevision.value,
+        currentRevision: Number(error.details?.currentRevision || 0),
+      }
+    } else {
+      setStatus(error?.message || 'Не удалось сохранить шаблон')
+    }
   } finally {
     saving.value = false
   }
+}
+
+const reloadTemplateConflict = async () => {
+  templateConflict.value = null
+  await loadTemplate()
+}
+
+const forceTemplateConflict = async () => {
+  const conflict = templateConflict.value
+  if (!conflict) return
+  templateConflict.value = null
+  await saveTemplate({ force: true, baseRevision: conflict.baseRevision })
 }
 
 onMounted(loadTemplate)
@@ -138,6 +170,12 @@ onMounted(loadTemplate)
 
 <template>
   <section class="bg-white border border-slate-100 rounded-lg p-4 shadow-sm space-y-4">
+    <DataConflictDialog
+      :conflict="templateConflict"
+      :busy="saving"
+      @reload="reloadTemplateConflict"
+      @force="forceTemplateConflict"
+    />
     <button
       type="button"
       @click="emit('back')"
@@ -247,7 +285,7 @@ onMounted(loadTemplate)
       </button>
       <button
         type="button"
-        @click="saveTemplate"
+        @click="saveTemplate()"
         :disabled="saving || loading"
         class="rounded-lg bg-blue-600 px-3 py-3 text-[10px] font-black uppercase text-white flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-60"
       >

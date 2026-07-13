@@ -11,6 +11,7 @@ export const useScheduleBooking = ({
   props,
   canManageSchedule,
   shifts,
+  scheduleRevision,
   saveStructure,
   fetchShifts,
   markShiftInteracted,
@@ -141,7 +142,8 @@ export const useScheduleBooking = ({
       if (!ok) return
 
       try {
-        await shiftsApi.book(shift.id)
+        const response = await shiftsApi.book(shift.id)
+        scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
         shift.employee_name = currentUserName.value
       } catch (error) {
         safeAlert(error?.message || 'Ошибка записи')
@@ -182,6 +184,7 @@ export const useScheduleBooking = ({
     assignBusy.value = true
     try {
       const response = await shiftsApi.assign(shift.id, selectedAssignUserId.value)
+      scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
       const employeeName = response.employee_name
       shifts.value = shifts.value.map((item) =>
         item.id === shift.id ? { ...item, employee_name: employeeName } : item,
@@ -228,13 +231,15 @@ export const useScheduleBooking = ({
 
       try {
         if (canManageSchedule.value) {
-          await shiftsApi.unbook(shift.id)
+          const response = await shiftsApi.unbook(shift.id)
+          scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
           shift.employee_name = null
           shift.unbook_request = null
           return
         }
 
         const response = await shiftsApi.requestUnbook(shift.id)
+        scheduleRevision.value = Number(response.revision || scheduleRevision.value + 1)
         shift.unbook_request = response.request
       } catch (error) {
         safeAlert(error?.message || 'Не удалось отправить заявку')
