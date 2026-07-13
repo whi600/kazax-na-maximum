@@ -22,16 +22,18 @@ export const listEditingPresenceStatement = db.prepare(`
 `)
 
 export const upsertResourceStateStatement = db.prepare(`
-  INSERT INTO resource_state(resource, last_changed_at, last_changed_by)
-  VALUES (?, datetime('now'), ?)
+  INSERT INTO resource_state(resource, last_changed_at, last_changed_by, revision)
+  VALUES (?, datetime('now'), ?, 1)
   ON CONFLICT(resource)
   DO UPDATE SET
     last_changed_at = datetime('now'),
-    last_changed_by = excluded.last_changed_by
+    last_changed_by = excluded.last_changed_by,
+    revision = resource_state.revision + 1
+  RETURNING resource, last_changed_at, last_changed_by, revision
 `)
 
 export const getResourceStateStatement = db.prepare(
-  'SELECT resource, last_changed_at, last_changed_by FROM resource_state WHERE resource = ?',
+  'SELECT resource, last_changed_at, last_changed_by, revision FROM resource_state WHERE resource = ?',
 )
 
 export const insertAuditLogStatement = db.prepare(`

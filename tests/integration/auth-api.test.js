@@ -5,6 +5,9 @@ import { db } from '../../server/db.js'
 
 let server
 let baseUrl
+let superAdmin
+let employee
+let product
 
 const request = async (path, { cookie, body, headers, ...options } = {}) => {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -24,6 +27,24 @@ beforeAll(async () => {
   server = createAppServer({ adminEmails: new Set([SUPER_ADMIN_EMAIL]) })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   baseUrl = `http://127.0.0.1:${server.address().port}`
+
+  superAdmin = await request('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: SUPER_ADMIN_EMAIL,
+      password: 'strong-password',
+      displayName: 'Super Admin',
+    },
+  })
+  employee = await request('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: 'employee@example.test',
+      password: 'strong-password',
+      displayName: 'Employee',
+      role: 'admin',
+    },
+  })
 })
 
 afterAll(async () => {
@@ -40,25 +61,7 @@ describe('auth and API boundaries', () => {
   })
 
   it('never trusts a public registration role', async () => {
-    const superAdmin = await request('/api/auth/register', {
-      method: 'POST',
-      body: {
-        email: SUPER_ADMIN_EMAIL,
-        password: 'strong-password',
-        displayName: 'Super Admin',
-      },
-    })
     expect(superAdmin.payload.user.role).toBe('admin')
-
-    const employee = await request('/api/auth/register', {
-      method: 'POST',
-      body: {
-        email: 'employee@example.test',
-        password: 'strong-password',
-        displayName: 'Employee',
-        role: 'admin',
-      },
-    })
     expect(employee.response.status).toBe(201)
     expect(employee.payload.user.role).toBe('employee')
 
@@ -67,6 +70,125 @@ describe('auth and API boundaries', () => {
 
     const forbiddenAudit = await request('/api/audit?limit=1', { cookie: employee.cookie })
     expect(forbiddenAudit.response.status).toBe(403)
+  })
+
+  it('makes assortment mutations idempotent and rejects stale versions', async () => {
+    const createBody = {
+      name: 'Тестовый товар',
+      category: 'bakery',
+      unit: 'шт',
+      operationId: 'product-create-0001',
+      baseRevision: 0,
+    }
+    const created = await request('/api/products', {
+      method: 'POST',
+      cookie: superAdmin.cookie,
+      body: createBody,
+    })
+    expect(created.response.status).toBe(201)
+    expect(created.payload.revision).toBe(1)
+    product = created.payload.product
+
+    const replayed = await request('/api/products', {
+      method: 'POST',
+      cookie: superAdmin.cookie,
+      body: createBody,
+    })
+    expect(replayed.response.status).toBe(201)
+    expect(replayed.payload).toEqual(created.payload)
+
+    const stale = await request(`/api/products/${product.id}`, {
+      method: 'PATCH',
+      cookie: superAdmin.cookie,
+      body: {
+        name: 'Устаревшее изменение',
+        category: 'bakery',
+        unit: 'шт',
+        operationId: 'product-update-0001',
+        baseRevision: 0,
+      },
+    })
+    expect(stale.response.status).toBe(409)
+    expect(stale.payload).toMatchObject({
+      code: 'REVISION_CONFLICT',
+      details: { currentRevision: 1 },
+    })
+  })
+
+  it('protects report writes with revisions and replays completed operations', async () => {
+    const saveBody = {
+      entries: [{ product_id: product.id, arrival: 3, remainder: 2, write_off: 1 }],
+      operationId: 'report-save-0001',
+      baseRevision: 0,
+    }
+    const saved = await request('/api/daily-records/today', {
+      method: 'PUT',
+      cookie: superAdmin.cookie,
+      body: saveBody,
+    })
+    expect(saved.response.status).toBe(200)
+    expect(saved.payload.revision).toBe(1)
+
+    const replayed = await request('/api/daily-records/today', {
+      method: 'PUT',
+      cookie: superAdmin.cookie,
+      body: saveBody,
+    })
+    expect(replayed.payload).toEqual(saved.payload)
+
+    const stale = await request('/api/daily-records/today', {
+      method: 'PUT',
+      cookie: superAdmin.cookie,
+      body: {
+        entries: [],
+        operationId: 'report-save-0002',
+        baseRevision: 0,
+      },
+    })
+    expect(stale.response.status).toBe(409)
+    expect(stale.payload.details.currentRevision).toBe(1)
+
+    const current = await request('/api/daily-records/today', {
+      cookie: superAdmin.cookie,
+    })
+    expect(current.payload.revision).toBe(1)
+    expect(current.payload.entries).toMatchObject([
+      { product_id: product.id, arrival: 3, remainder: 2, write_off: 1 },
+    ])
+  })
+
+  it('accepts a queued previous-day report only for its scheduled employee', async () => {
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const date = [
+      yesterday.getFullYear(),
+      String(yesterday.getMonth() + 1).padStart(2, '0'),
+      String(yesterday.getDate()).padStart(2, '0'),
+    ].join('-')
+    await db.query(
+      `INSERT INTO shifts(date, start_time, end_time, employee_name, status)
+       VALUES ($1, '09:00', '15:00', 'Employee', 'approved')`,
+      [date],
+    )
+
+    const saved = await request(`/api/daily-records/${date}`, {
+      method: 'PUT',
+      cookie: employee.cookie,
+      body: {
+        entries: [{ product_id: product.id, remainder: 4 }],
+        operationId: 'previous-report-0001',
+        baseRevision: 0,
+        offlineReplay: true,
+      },
+    })
+    expect(saved.response.status).toBe(200)
+    expect(saved.payload.revision).toBe(1)
+
+    const loaded = await request(`/api/daily-records/${date}`, {
+      cookie: employee.cookie,
+    })
+    expect(loaded.response.status).toBe(200)
+    expect(loaded.payload.entries[0].remainder).toBe(4)
   })
 
   it('returns a client error for malformed JSON', async () => {

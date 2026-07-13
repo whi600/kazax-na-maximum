@@ -116,7 +116,11 @@ export const withErrorHandling = async (res, fn) => {
     await fn()
   } catch (error) {
     if (isHttpError(error)) {
-      json(res, error.statusCode, { error: error.message, code: error.code })
+      json(res, error.statusCode, {
+        error: error.message,
+        code: error.code,
+        ...(error.details ? { details: error.details } : {}),
+      })
       return
     }
 

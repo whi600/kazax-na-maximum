@@ -10,6 +10,8 @@ import { useAssortmentPresence } from './app/useAssortmentPresence'
 import AdminArchive from './components/archive/AdminArchive.vue'
 import ScheduleView from './components/schedule/ScheduleView.vue'
 import AuthView from './components/shared/AuthView.vue'
+import DataConflictDialog from './components/shared/conflicts/DataConflictDialog.vue'
+import ReportConflictDialog from './components/shared/conflicts/ReportConflictDialog.vue'
 import AppHeader from './components/layout/AppHeader.vue'
 import AppBottomNav from './components/layout/AppBottomNav.vue'
 import ReportView from './components/report/ReportView.vue'
@@ -67,9 +69,11 @@ const {
   reportSaveStatus,
   reportSaveLabel,
   reportSaveClass,
+  reportConflict,
   productSaveBusy,
   editingProductId,
   productForm,
+  productConflict,
   resetProductForm,
   updateProductFormField,
   loadReportData,
@@ -78,10 +82,14 @@ const {
   saveReport,
   retryReportSave,
   completeReport,
+  resolveReportConflicts,
+  discardLocalReportConflict,
   scheduleReportAutosave,
   startEditProduct,
   saveProduct,
   removeProduct,
+  reloadProductConflict,
+  forceProductConflict,
   clearReportState,
   cleanupReportTimers,
 } = useReportState({ canManageProducts, currentUser })
@@ -477,7 +485,7 @@ onBeforeUnmount(() => {
       <div
         v-if="activeTab === 'main' && reportCanEditToday && reportSaveLabel"
         class="fixed left-1/2 -translate-x-1/2 z-[120]"
-        :class="reportSaveStatus === 'error' ? 'pointer-events-auto' : 'pointer-events-none'"
+        :class="['pending', 'error'].includes(reportSaveStatus) ? 'pointer-events-auto' : 'pointer-events-none'"
         :style="{ bottom: 'calc(86px + var(--app-safe-bottom))' }"
       >
         <div
@@ -486,7 +494,7 @@ onBeforeUnmount(() => {
         >
           <span>{{ reportSaveLabel }}</span>
           <button
-            v-if="reportSaveStatus === 'error'"
+            v-if="['pending', 'error'].includes(reportSaveStatus)"
             type="button"
             @click="retryReportSave"
             class="rounded-full bg-red-500 px-3 py-1 text-[10px] font-black uppercase text-white active:scale-95 transition-all"
@@ -495,6 +503,18 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
+
+      <ReportConflictDialog
+        :conflict="reportConflict"
+        @resolve="resolveReportConflicts"
+        @discard="discardLocalReportConflict"
+      />
+      <DataConflictDialog
+        :conflict="productConflict"
+        :busy="productSaveBusy"
+        @reload="reloadProductConflict"
+        @force="forceProductConflict"
+      />
 
       <Teleport to="body">
         <Transition name="sheet">

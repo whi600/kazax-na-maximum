@@ -1,4 +1,24 @@
-const apiRequest = async (path, options = {}) => {
+export class ApiError extends Error {
+  constructor(message, { status = 0, code = '', details = null, payload = null } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+    this.details = details
+    this.payload = payload
+  }
+}
+
+const withMutationMeta = (payload, meta = {}) => ({
+  ...payload,
+  ...(meta.operationId ? { operationId: meta.operationId } : {}),
+  ...(meta.baseRevision !== undefined && meta.baseRevision !== null
+    ? { baseRevision: meta.baseRevision }
+    : {}),
+  ...(meta.force ? { force: true } : {}),
+})
+
+export const apiRequest = async (path, options = {}) => {
   const response = await fetch(path, {
     credentials: 'include',
     headers: {
@@ -13,7 +33,12 @@ const apiRequest = async (path, options = {}) => {
 
   if (!response.ok) {
     const message = payload?.error || `HTTP ${response.status}`
-    throw new Error(message)
+    throw new ApiError(message, {
+      status: response.status,
+      code: payload?.code || '',
+      details: payload?.details || null,
+      payload,
+    })
   }
 
   return payload
@@ -49,25 +74,42 @@ export const authApi = {
 
 export const recordsApi = {
   products: () => apiRequest('/api/products', { method: 'GET' }),
-  createProduct: (payload) =>
+  createProduct: (payload, meta) =>
     apiRequest('/api/products', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withMutationMeta(payload, meta)),
     }),
-  updateProduct: (id, payload) =>
+  updateProduct: (id, payload, meta) =>
     apiRequest(`/api/products/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withMutationMeta(payload, meta)),
     }),
-  deleteProduct: (id) => apiRequest(`/api/products/${id}`, { method: 'DELETE' }),
+  deleteProduct: (id, meta = {}) =>
+    apiRequest(`/api/products/${id}`, {
+      method: 'DELETE',
+      headers: {
+        ...(meta.operationId ? { 'X-Operation-Id': meta.operationId } : {}),
+        ...(meta.baseRevision !== undefined && meta.baseRevision !== null
+          ? { 'X-Base-Revision': String(meta.baseRevision) }
+          : {}),
+        ...(meta.force ? { 'X-Force-Write': '1' } : {}),
+      },
+    }),
+  report: (date = 'today') =>
+    apiRequest(`/api/daily-records/${encodeURIComponent(date)}`, { method: 'GET' }),
   today: () => apiRequest('/api/daily-records/today', { method: 'GET' }),
-  saveToday: (entries) =>
-    apiRequest('/api/daily-records/today', {
+  saveReport: (date, entries, meta = {}) =>
+    apiRequest(`/api/daily-records/${encodeURIComponent(date)}`, {
       method: 'PUT',
-      body: JSON.stringify({ entries }),
+      body: JSON.stringify(withMutationMeta({ entries, offlineReplay: meta.offlineReplay }, meta)),
     }),
-  completeToday: () =>
-    apiRequest('/api/daily-records/today/complete', { method: 'POST' }),
+  saveToday: (entries, meta) => recordsApi.saveReport('today', entries, meta),
+  completeReport: (date, meta = {}) =>
+    apiRequest(`/api/daily-records/${encodeURIComponent(date)}/complete`, {
+      method: 'POST',
+      body: JSON.stringify(withMutationMeta({ offlineReplay: meta.offlineReplay }, meta)),
+    }),
+  completeToday: (meta) => recordsApi.completeReport('today', meta),
   archive: ({ limitDays = 3, offsetDays = 0 } = {}) =>
     apiRequest(
       `/api/archive/records?limitDays=${limitDays}&offsetDays=${offsetDays}`,

@@ -147,6 +147,7 @@ export const handleAdminRoutes = async ({ req, res, pathname, requestUrl, db }) 
       activeEditors,
       lastChangedAt: state?.last_changed_at || null,
       lastChangedBy: state?.last_changed_by || null,
+      revision: Number(state?.revision || 0),
     })
     return true
   }

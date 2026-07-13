@@ -35,10 +35,12 @@ export const logAudit = async ({
   before = null,
   after = null,
   context = null,
+  client = null,
 }) => {
   if (!actorUser?.id || !action || !entityType) return
 
-  await insertAuditLogStatement.run(
+  const method = client ? 'runOn' : 'run'
+  const args = [
     actorUser.id,
     actorUser.name || actorUser.email || 'system',
     String(entityType),
@@ -47,10 +49,14 @@ export const logAudit = async ({
     toAuditPayload(before),
     toAuditPayload(after),
     toAuditPayload(context),
-  )
+  ]
+  await insertAuditLogStatement[method](...(client ? [client, ...args] : args))
 }
 
 export const touchResource = async (resource, actorUser) => {
   if (!isEditableResource(resource)) return
-  await upsertResourceStateStatement.run(resource, actorUser?.name || actorUser?.email || 'system')
+  return upsertResourceStateStatement.get(
+    resource,
+    actorUser?.name || actorUser?.email || 'system',
+  )
 }

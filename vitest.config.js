@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     environment: 'node',
+    environmentOptions: {
+      jsdom: { url: 'http://localhost/' },
+    },
     include: ['tests/unit/**/*.test.js'],
     restoreMocks: true,
   },
