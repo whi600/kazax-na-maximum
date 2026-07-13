@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master, feature/reliability-v2]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://kofeteriy_test:kofeteriy_test@127.0.0.1:5432/kofeteriy_test
+      NODE_ENV: test
+      SKIP_DEFAULT_PRODUCTS: "1"
+      DISABLE_BACKGROUND_JOBS: "1"
+      TZ: Asia/Yekaterinburg
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kofeteriy_test
+          POSTGRES_USER: kofeteriy_test
+          POSTGRES_PASSWORD: kofeteriy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kofeteriy_test -d kofeteriy_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+      - run: node scripts/reset-test-database.js && npm run test:integration:ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: node scripts/reset-test-database.js && npm run test:e2e:ci
+      - run: npm run build
+
+      - name: Upload browser diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-${{ github.run_id }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 3

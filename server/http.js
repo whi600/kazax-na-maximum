@@ -58,7 +58,7 @@ export const clearSessionCookie = ({ res, sessionCookie }) => {
   res.setHeader('Set-Cookie', parts.join('; '))
 }
 
-export const readJsonBody = (req, maxBodySize) =>
+export const readJsonBody = (req, maxBodySize = 1_000_000) =>
   new Promise((resolve, reject) => {
     let total = 0
     let raw = ''
@@ -66,7 +66,7 @@ export const readJsonBody = (req, maxBodySize) =>
     req.on('data', (chunk) => {
       total += chunk.length
       if (total > maxBodySize) {
-        reject(new Error('Request body too large'))
+        reject(bodyTooLargeError())
         req.destroy()
         return
       }
@@ -82,7 +82,7 @@ export const readJsonBody = (req, maxBodySize) =>
       try {
         resolve(JSON.parse(raw))
       } catch {
-        reject(new Error('Invalid JSON'))
+        reject(invalidJsonError())
       }
     })
 
@@ -115,7 +115,13 @@ export const withErrorHandling = async (res, fn) => {
   try {
     await fn()
   } catch (error) {
+    if (isHttpError(error)) {
+      json(res, error.statusCode, { error: error.message, code: error.code })
+      return
+    }
+
     console.error(error)
     json(res, 500, { error: 'Внутренняя ошибка сервера' })
   }
 }
+import { bodyTooLargeError, invalidJsonError, isHttpError } from './errors.js'

@@ -8,6 +8,12 @@
     "dev:api": "node server/index.js",
     "dev:all": "node server/index.js & vite",
     "build": "node scripts/write-build-version.js && vite build",
+    "test:unit": "TZ=Asia/Yekaterinburg vitest run --config vitest.config.js",
+    "test:integration": "bash scripts/run-test-suite.sh integration",
+    "test:integration:ci": "TZ=Asia/Yekaterinburg vitest run --config vitest.integration.config.js",
+    "test:e2e": "bash scripts/run-test-suite.sh e2e",
+    "test:e2e:ci": "TZ=Asia/Yekaterinburg playwright test",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "preview": "vite preview",
     "start": "node server/index.js",
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.js",
@@ -22,7 +28,12 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@vitejs/plugin-vue": "^6.0.2",
-    "vite": "^7.3.1"
+    "@vue/test-utils": "^2.4.11",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.1.1",
+    "vite": "^7.3.1",
+    "vitest": "^4.1.10"
   }
 }

@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kofeteriy_test
+      POSTGRES_USER: kofeteriy_test
+      POSTGRES_PASSWORD: kofeteriy_test
+    ports:
+      - "127.0.0.1:${TEST_PG_PORT:-55432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kofeteriy_test -d kofeteriy_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
