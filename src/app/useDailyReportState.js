@@ -18,11 +18,13 @@ export const useDailyReportState = ({ currentUser }) => {
   const reportDate = ref('')
   const reportRevision = ref(0)
   const reportCanEditToday = ref(false)
+  const reportCanOverrideCompletion = ref(false)
   const reportCompleted = ref(false)
   const reportCompletedAt = ref(null)
   const reportCompletedByName = ref('')
   const reportCompleting = ref(false)
   const reportConflict = ref(null)
+  const reportLockedNoticeOpen = ref(false)
   const {
     reportSaveStatus,
     reportSaveLabel,
@@ -51,6 +53,10 @@ export const useDailyReportState = ({ currentUser }) => {
     },
     applyReportStatus,
     setReportStatus,
+    onReportCompletedLocked: () => {
+      applyReportStatus({ completed: true })
+      reportLockedNoticeOpen.value = true
+    },
   })
 
   const restoreLocalOperation = async () => {
@@ -74,6 +80,7 @@ export const useDailyReportState = ({ currentUser }) => {
     reportDate.value = response.recordDate || getLocalDateKey()
     reportRevision.value = Number(response.revision || 0)
     reportCanEditToday.value = Boolean(response.canEdit)
+    reportCanOverrideCompletion.value = Boolean(response.canOverrideCompletion)
     applyReportStatus(response.reportStatus)
     baseEntries = normalizeReportEntries(response.entries)
     dailyEntries.value = normalizeReportEntries(response.entries)
@@ -144,8 +151,10 @@ export const useDailyReportState = ({ currentUser }) => {
     reportDate.value = ''
     reportRevision.value = 0
     reportCanEditToday.value = false
+    reportCanOverrideCompletion.value = false
     applyReportStatus(null)
     reportConflict.value = null
+    reportLockedNoticeOpen.value = false
     setReportStatus('idle')
   }
 
@@ -158,6 +167,7 @@ export const useDailyReportState = ({ currentUser }) => {
   return {
     dailyEntries,
     reportCanEditToday,
+    reportCanOverrideCompletion,
     reportCompleted,
     reportCompletedAt,
     reportCompletedByName,
@@ -166,6 +176,13 @@ export const useDailyReportState = ({ currentUser }) => {
     reportSaveLabel,
     reportSaveClass,
     reportConflict,
+    reportLockedNoticeOpen,
+    openReportLockedNotice: () => {
+      reportLockedNoticeOpen.value = true
+    },
+    closeReportLockedNotice: () => {
+      reportLockedNoticeOpen.value = false
+    },
     loadDailyReport,
     onAddProduct,
     removeReportEntry,

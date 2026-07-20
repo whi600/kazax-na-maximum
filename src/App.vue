@@ -21,6 +21,7 @@ import ReportConflictDialog from './components/shared/conflicts/ReportConflictDi
 import AppHeader from './components/layout/AppHeader.vue'
 import AppBottomNav from './components/layout/AppBottomNav.vue'
 import ReportCompletionDialog from './components/report/ReportCompletionDialog.vue'
+import ReportLockedDialog from './components/report/ReportLockedDialog.vue'
 import ReportSaveStatusToast from './components/report/ReportSaveStatusToast.vue'
 import ReportView from './components/report/ReportView.vue'
 import AppProfileSection from './components/profile/AppProfileSection.vue'
@@ -63,6 +64,7 @@ const {
   products,
   dailyEntries,
   reportCanEditToday,
+  reportCanOverrideCompletion,
   reportCompleted,
   reportCompletedAt,
   reportCompletedByName,
@@ -71,6 +73,9 @@ const {
   reportSaveLabel,
   reportSaveClass,
   reportConflict,
+  reportLockedNoticeOpen,
+  openReportLockedNotice,
+  closeReportLockedNotice,
   productSaveBusy,
   editingProductId,
   productForm,
@@ -115,7 +120,7 @@ const reportEditable = computed(
   () =>
     reportCanEditToday.value &&
     !isChef.value &&
-    (!reportCompleted.value || userRole.value === 'admin'),
+    (!reportCompleted.value || reportCanOverrideCompletion.value),
 )
 const {
   activeTab,
@@ -348,8 +353,10 @@ onBeforeUnmount(() => {
             :products="products"
             :daily-entries="dailyEntries"
             :editable="reportEditable"
+            :completed="reportCompleted"
             @add-product="onAddProduct"
             @remove-entry="removeReportEntry"
+            @locked-attempt="openReportLockedNotice"
           />
         </div>
       </main>
@@ -388,6 +395,11 @@ onBeforeUnmount(() => {
         :busy="reportCompleting"
         @close="closeReportCompleteConfirm"
         @confirm="confirmReportComplete"
+      />
+
+      <ReportLockedDialog
+        :open="reportLockedNoticeOpen"
+        @close="closeReportLockedNotice"
       />
     </template>
   </div>

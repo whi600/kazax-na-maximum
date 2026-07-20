@@ -7,6 +7,7 @@ let server
 let baseUrl
 let superAdmin
 let employee
+let admin
 let product
 
 const request = async (path, { cookie, body, headers, ...options } = {}) => {
@@ -45,6 +46,15 @@ beforeAll(async () => {
       role: 'admin',
     },
   })
+  admin = await request('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: 'admin@example.test',
+      password: 'strong-password',
+      displayName: 'Admin',
+    },
+  })
+  await db.query("UPDATE users SET role = 'admin' WHERE id = $1", [admin.payload.user.id])
 })
 
 afterAll(async () => {
@@ -182,6 +192,75 @@ describe('auth and API boundaries', () => {
     expect(current.payload.entries).toMatchObject([
       { product_id: product.id, arrival: 3, remainder: 2, write_off: 1 },
     ])
+  })
+
+  it('lets only admins override a completed report', async () => {
+    const today = new Date()
+    const date = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-')
+    await db.query(
+      `INSERT INTO shifts(
+        date, start_time, end_time, employee_name, employee_user_id, status
+      ) VALUES ($1, '09:00', '15:00', 'Employee', $2, 'approved')`,
+      [date, employee.payload.user.id],
+    )
+
+    const employeeReport = await request('/api/daily-records/today', { cookie: employee.cookie })
+    expect(employeeReport.response.status).toBe(200)
+    expect(employeeReport.payload).toMatchObject({
+      canEdit: true,
+      canOverrideCompletion: false,
+    })
+
+    const adminReport = await request('/api/daily-records/today', { cookie: admin.cookie })
+    expect(adminReport.payload).toMatchObject({
+      canEdit: true,
+      canOverrideCompletion: true,
+    })
+
+    const superAdminReport = await request('/api/daily-records/today', { cookie: superAdmin.cookie })
+    expect(superAdminReport.payload).toMatchObject({
+      canEdit: true,
+      canOverrideCompletion: true,
+    })
+
+    const completed = await request('/api/daily-records/today/complete', {
+      method: 'POST',
+      cookie: employee.cookie,
+      body: {
+        operationId: 'employee-report-complete-0001',
+        baseRevision: employeeReport.payload.revision,
+      },
+    })
+    expect(completed.response.status).toBe(200)
+    expect(completed.payload.reportStatus.completed).toBe(true)
+
+    const locked = await request('/api/daily-records/today', {
+      method: 'PUT',
+      cookie: employee.cookie,
+      body: {
+        entries: [{ product_id: product.id, arrival: 7 }],
+        operationId: 'employee-report-locked-0001',
+        baseRevision: completed.payload.revision,
+      },
+    })
+    expect(locked.response.status).toBe(403)
+    expect(locked.payload.code).toBe('REPORT_COMPLETED')
+
+    const unlocked = await request('/api/daily-records/today', {
+      method: 'PUT',
+      cookie: admin.cookie,
+      body: {
+        entries: [{ product_id: product.id, arrival: 7 }],
+        operationId: 'admin-report-unlock-0001',
+        baseRevision: completed.payload.revision,
+      },
+    })
+    expect(unlocked.response.status).toBe(200)
+    expect(unlocked.payload.reportStatus.completed).toBe(false)
   })
 
   it('accepts a queued previous-day report only for its scheduled employee', async () => {

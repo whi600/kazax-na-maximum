@@ -4,9 +4,17 @@ const props = defineProps({
   item: { type: Object, required: true },
   editable: { type: Boolean, default: true },
 });
-const emit = defineEmits(['remove']);
+const emit = defineEmits(['remove', 'locked-attempt']);
+
+const blockWhenLocked = (event) => {
+  if (props.editable) return false
+  event?.preventDefault?.()
+  emit('locked-attempt')
+  return true
+}
 
 const handleEnter = (event) => {
+  if (blockWhenLocked(event)) return
   const inputs = Array.from(document.querySelectorAll('.report-entry-input:not(:disabled)'))
   const currentIndex = inputs.indexOf(event.target)
   const nextInput = inputs[currentIndex + 1]
@@ -21,7 +29,13 @@ const handleEnter = (event) => {
 }
 
 const selectInputValue = (event) => {
+  if (blockWhenLocked(event)) return
   event.target.select?.()
+}
+
+const handleRemove = (event) => {
+  if (blockWhenLocked(event)) return
+  emit('remove')
 }
 </script>
 
@@ -36,7 +50,9 @@ const selectInputValue = (event) => {
         <input 
           type="number" 
           v-model.number="item[field]" 
-          :disabled="!editable"
+          :readonly="!editable"
+          :aria-readonly="!editable"
+          @pointerdown="blockWhenLocked"
           @keydown.enter="handleEnter"
           @focus="selectInputValue"
           inputmode="numeric"
@@ -46,15 +62,17 @@ const selectInputValue = (event) => {
             'text-blue-600 border-blue-200 bg-blue-50/40': field === 'arrival' && item[field] > 0,
             'text-blue-600 border-blue-200 bg-blue-50/40': field === 'remainder' && item[field] > 0,
             'text-red-500 border-red-200 bg-red-50/40': field === 'write_off' && item[field] > 0,
-            'text-slate-400': !item[field]
+            'text-slate-400': !item[field],
+            'cursor-not-allowed': !editable,
           }"
         />
       </div>
 
       <button 
-        @click="$emit('remove')"
-        :disabled="!editable"
+        @click="handleRemove"
+        :aria-disabled="!editable"
         class="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 text-red-500 active:bg-red-500 active:text-white transition-all ml-1 shrink-0"
+        :class="{ 'opacity-55': !editable }"
       >
         <Trash2 class="w-4 h-4" />
       </button>

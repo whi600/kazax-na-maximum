@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { ChefHat, ChevronDown, LayoutGrid, ShoppingBasket } from 'lucide-vue-next'
+import { ChefHat, ChevronDown, LayoutGrid, LockKeyhole, ShoppingBasket } from 'lucide-vue-next'
 import EntryCard from './EntryCard.vue'
 import ProductSelector from './ProductSelector.vue'
 
@@ -8,9 +8,10 @@ const props = defineProps({
   products: { type: Array, default: () => [] },
   dailyEntries: { type: Array, default: () => [] },
   editable: { type: Boolean, default: true },
+  completed: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['add-product', 'remove-entry'])
+const emit = defineEmits(['add-product', 'remove-entry', 'locked-attempt'])
 
 const categories = [
   { key: 'bakery', label: 'Выпечка', icon: ShoppingBasket },
@@ -43,16 +44,36 @@ const toggleGroup = (key) => {
   }
 }
 
+const notifyLockedAttempt = () => {
+  if (props.completed && !props.editable) emit('locked-attempt')
+}
+
 </script>
 
 <template>
   <div class="space-y-4 page-fade page-stack">
     <div class="space-y-4 page-stack">
+      <button
+        v-if="completed && !editable"
+        type="button"
+        class="flex w-full items-center gap-3 rounded-xl border border-amber-100 bg-amber-50 px-3 py-3 text-left"
+        @click="notifyLockedAttempt"
+      >
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-amber-600">
+          <LockKeyhole class="h-4 w-4" />
+        </span>
+        <span class="min-w-0">
+          <span class="block text-xs font-black text-amber-800">Отчёт готов</span>
+          <span class="mt-0.5 block text-[10px] font-bold leading-relaxed text-amber-700">Нужны правки? Обратитесь к администратору.</span>
+        </span>
+      </button>
+
       <ProductSelector
         :products="products"
         :dailyEntries="dailyEntries"
         :disabled="!editable"
         @add="emit('add-product', $event)"
+        @locked-attempt="notifyLockedAttempt"
       />
 
       <div v-for="category in categories" :key="category.key" class="space-y-1">
@@ -90,6 +111,7 @@ const toggleGroup = (key) => {
               :item="item"
               :editable="editable"
               @remove="emit('remove-entry', item)"
+              @locked-attempt="notifyLockedAttempt"
             />
           </div>
         </div>

@@ -18,6 +18,7 @@ import {
 } from '../services/mutation-service.js'
 import {
   canEditDailyReport,
+  canOverrideCompletedReport,
   canUseReportMutationDate,
   getReportResource,
   mapReportEntries,
@@ -35,13 +36,17 @@ const parseReportTarget = (pathname) => {
   return { date: match[1], complete: Boolean(match[2]) }
 }
 
-const getReportPayload = async (user, date) => ({
-  recordDate: date,
-  entries: mapReportEntries(await listTodayRecordsStatement.all(date)),
-  canEdit: await canEditDailyReport(user, date),
-  reportStatus: mapReportStatus(await getDailyReportStatusStatement.get(date)),
-  revision: await getResourceRevision(getReportResource(date)),
-})
+const getReportPayload = async (user, date) => {
+  const canOverrideCompletion = canOverrideCompletedReport(user)
+  return {
+    recordDate: date,
+    entries: mapReportEntries(await listTodayRecordsStatement.all(date)),
+    canEdit: canOverrideCompletion || await canEditDailyReport(user, date),
+    canOverrideCompletion,
+    reportStatus: mapReportStatus(await getDailyReportStatusStatement.get(date)),
+    revision: await getResourceRevision(getReportResource(date)),
+  }
+}
 
 export const handleDailyReportRoutes = async ({ req, res, pathname, db }) => {
   const target = parseReportTarget(pathname)
@@ -96,10 +101,10 @@ export const handleDailyReportRoutes = async ({ req, res, pathname, db }) => {
     execute: async (client) => {
       if (isSave) {
         const status = await getDailyReportStatusStatement.getOn(client, date)
-        if (status?.completed_at && user.role !== 'admin') {
+        if (status?.completed_at && !canOverrideCompletedReport(user)) {
           throw new HttpError(
             403,
-            'Отчет уже отмечен готовым. Изменить его может только админ',
+            'Отчет уже отмечен готовым. Для изменений обратитесь к администратору',
             'REPORT_COMPLETED',
           )
         }

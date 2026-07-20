@@ -37,6 +37,7 @@ export const createReportSyncManager = ({
   setBaseEntries,
   applyReportStatus,
   setReportStatus,
+  onReportCompletedLocked,
 }) => {
   let retryTimer = null
   let retryAttempt = 0
@@ -105,7 +106,7 @@ export const createReportSyncManager = ({
       return 'retry'
     }
 
-    let completedStatus = null
+    let reportStatus = saved.reportStatus || null
     if (syncing.completionRequested) {
       const completed = await recordsApi.completeReport(operation.recordDate, {
         operationId: syncing.completionOperationId,
@@ -113,7 +114,7 @@ export const createReportSyncManager = ({
         offlineReplay: operation.recordDate !== localDateKey(),
       })
       revision = Number(completed.revision || revision + 1)
-      completedStatus = completed.reportStatus
+      reportStatus = completed.reportStatus
     }
 
     if (!(await removeReportOperation(syncing))) return 'retry'
@@ -122,7 +123,7 @@ export const createReportSyncManager = ({
       setBaseEntries(operation.entries)
       reportRevision.value = revision
       reportConflict.value = null
-      applyReportStatus(completedStatus)
+      applyReportStatus(reportStatus)
       setReportStatus('saved')
     } else {
       setReportStatus('saved')
@@ -154,6 +155,10 @@ export const createReportSyncManager = ({
         } catch (loadError) {
           error = loadError
         }
+      }
+
+      if (error instanceof ApiError && error.code === 'REPORT_COMPLETED') {
+        onReportCompletedLocked?.()
       }
 
       const retryable = !(error instanceof ApiError) || error.status === 0 || error.status >= 500

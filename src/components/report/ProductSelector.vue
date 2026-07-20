@@ -7,7 +7,7 @@ const props = defineProps({
   dailyEntries: { type: Array, default: () => [] },
   disabled: { type: Boolean, default: false },
 });
-const emit = defineEmits(['add']);
+const emit = defineEmits(['add', 'locked-attempt']);
 const searchQuery = ref('');
 const selectedCategory = ref('all');
 const onlyNotAdded = ref(false);
@@ -34,6 +34,14 @@ const filtered = computed(() => {
     return String(product.name || '').toLowerCase().includes(query);
   });
 });
+
+const addProduct = (product) => {
+  if (props.disabled) {
+    emit('locked-attempt')
+    return
+  }
+  emit('add', product)
+}
 </script>
 
 <template>
@@ -93,7 +101,7 @@ const filtered = computed(() => {
 
     <div class="bg-slate-100/50 p-1.5 rounded-xl">
       <div class="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-        <button v-for="p in filtered" :key="p.id" @click="emit('add', p)" :disabled="disabled"
+        <button v-for="p in filtered" :key="p.id" @click="addProduct(p)" :aria-disabled="disabled"
           :class="[
             'flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all active:scale-95 border shadow-sm flex items-center gap-1',
             dailyEntries.find(e => e.product_id === p.id) 

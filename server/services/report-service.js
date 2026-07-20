@@ -1,4 +1,5 @@
 import { getApprovedShiftForUserDateStatement } from '../statements.js'
+import { isSuperAdminUser } from '../auth.js'
 import { getToday } from '../date-utils.js'
 
 export const getReportResource = (date) => `report:${date}`
@@ -41,8 +42,11 @@ export const normalizeReportEntries = (entries) =>
         (entry.arrival !== 0 || entry.remainder !== 0 || entry.write_off !== 0),
     )
 
+export const canOverrideCompletedReport = (user) =>
+  user?.role === 'admin' || isSuperAdminUser(user)
+
 export const canEditDailyReport = async (user, date) => {
-  if (user?.role === 'admin') return true
+  if (canOverrideCompletedReport(user)) return true
   if (!user?.name) return false
   return Boolean(await getApprovedShiftForUserDateStatement.get(date, user.name))
 }
@@ -57,4 +61,6 @@ export const isPreviousLocalDay = (date) => {
 }
 
 export const canUseReportMutationDate = ({ user, date, offlineReplay }) =>
-  date === getToday() || user?.role === 'admin' || (offlineReplay && isPreviousLocalDay(date))
+  date === getToday()
+  || canOverrideCompletedReport(user)
+  || (offlineReplay && isPreviousLocalDay(date))

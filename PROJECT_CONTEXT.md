@@ -8,7 +8,7 @@ Short, stable facts only. Load this first; open detailed notes only when the tas
 - Main deploy script: `scripts/update-production.sh`.
 - Key runtime files: `server/index.js`, `server/routes/*`, `server/auth.js`, `server/db.js`, `server/notifications.js`, `server/push.js`, `src/navigation.js`, `src/permissions.js`.
 - Data safety: PostgreSQL persists business data; report/product/schedule writes use revisions and idempotency, and report drafts use a local offline outbox.
-- Tests: `npm run test:unit`, `npm run test:integration`, `npm run test:e2e`, or `npm run test:all` against an isolated PostgreSQL database.
+- Tests: choose scope by change risk; available commands are `npm run test:unit`, `npm run test:integration`, `npm run test:e2e`, and `npm run test:all` against an isolated PostgreSQL database. On success, inspect only the final status; read logs only after a failure.
 - Detailed notes: Obsidian vault `Проекты/Kofeyny`.
 - Workflow rule: after accepted code changes, commit, push, then run `/opt/kofeteriy/app/scripts/update-production.sh`; feature branches stay off production until explicit acceptance.
 - Decomposition rule: target files around 200 lines when practical; if a file grows past about 400 lines, split it by responsibility unless there is a clear reason not to.
