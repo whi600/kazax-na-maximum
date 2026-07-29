@@ -210,6 +210,14 @@ export const shiftsApi = {
   remove: (id) => apiRequest(`/api/shifts/${id}`, { method: 'DELETE' }),
 }
 
+export const assistantApi = {
+  command: (command) =>
+    apiRequest('/api/assistant/inventory', {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    }),
+}
+
 export const editingApi = {
   heartbeat: ({ resource, active = true }) =>
     apiRequest('/api/editing/heartbeat', {

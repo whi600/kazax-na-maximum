@@ -85,6 +85,7 @@ const {
   loadReportData,
   onAddProduct,
   removeReportEntry,
+  applyAssistantActions,
   saveReport,
   retryReportSave,
   completeReport,
@@ -356,6 +357,7 @@ onBeforeUnmount(() => {
             :completed="reportCompleted"
             @add-product="onAddProduct"
             @remove-entry="removeReportEntry"
+            @assistant-actions="applyAssistantActions"
             @locked-attempt="openReportLockedNotice"
           />
         </div>

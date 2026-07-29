@@ -26,10 +26,45 @@ export const useReportState = ({ canManageProducts, currentUser }) => {
     dailyReport.cleanupDailyReport()
   }
 
+  const applyAssistantActions = async (actions) => {
+    if (
+      !dailyReport.reportCanEditToday.value ||
+      (dailyReport.reportCompleted.value && !dailyReport.reportCanOverrideCompletion.value)
+    ) {
+      return 0
+    }
+
+    let changed = 0
+    for (const action of Array.isArray(actions) ? actions : []) {
+      if (action?.type !== 'set_remainder') continue
+
+      const productId = Number(action.productId)
+      const remainder = Number(action.remainder)
+      if (!Number.isInteger(productId) || !Number.isFinite(remainder) || remainder < 0) continue
+
+      const product = productState.products.value.find((item) => item.id === productId)
+      if (!product) continue
+
+      let entry = dailyReport.dailyEntries.value.find((item) => item.product_id === productId)
+      if (!entry) {
+        dailyReport.onAddProduct(product)
+        entry = dailyReport.dailyEntries.value.find((item) => item.product_id === productId)
+      }
+      if (!entry || entry.remainder === remainder) continue
+
+      entry.remainder = remainder
+      changed += 1
+    }
+
+    if (changed) await dailyReport.saveReport({ silent: true })
+    return changed
+  }
+
   return {
     ...productState,
     ...dailyReport,
     loadReportData,
+    applyAssistantActions,
     clearReportState,
     cleanupReportTimers,
   }
