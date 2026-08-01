@@ -17,6 +17,7 @@ import AdminArchive from './components/archive/AdminArchive.vue'
 import ScheduleView from './components/schedule/ScheduleView.vue'
 import AuthView from './components/shared/AuthView.vue'
 import DataConflictDialog from './components/shared/conflicts/DataConflictDialog.vue'
+import GlobalAssistant from './components/shared/GlobalAssistant.vue'
 import ReportConflictDialog from './components/shared/conflicts/ReportConflictDialog.vue'
 import AppHeader from './components/layout/AppHeader.vue'
 import AppBottomNav from './components/layout/AppBottomNav.vue'
@@ -32,6 +33,7 @@ const SUPER_ADMIN_EMAIL = 'misakurnikov942@gmail.com'
 applyStandalonePwaClass()
 
 const scheduleViewRef = ref(null)
+const archiveViewRef = ref(null)
 const schedulePendingCount = ref(0)
 const profileView = ref('main')
 const {
@@ -217,6 +219,14 @@ const logout = async () => {
   stopAssortmentPresence()
 }
 
+const refreshScheduleAfterAssistant = async () => {
+  await scheduleViewRef.value?.refresh?.()
+}
+
+const refreshCalendarAfterAssistant = async () => {
+  await archiveViewRef.value?.refreshCalendar?.()
+}
+
 watch(
   [activeTab, profileView, canManageProducts],
   () => {
@@ -277,6 +287,15 @@ onBeforeUnmount(() => {
         @open-schedule-action="openScheduleAction"
         @complete-report="openReportCompleteConfirm"
       />
+
+      <div class="px-2 pb-2">
+        <GlobalAssistant
+          :disabled="appLoading"
+          @inventory-actions="applyAssistantActions"
+          @schedule-completed="refreshScheduleAfterAssistant"
+          @calendar-completed="refreshCalendarAfterAssistant"
+        />
+      </div>
 
       <main :class="activeTab === 'profile' ? 'p-2 pt-safe' : 'p-2'">
         <div v-if="appLoading" class="flex justify-center py-10">
@@ -343,6 +362,7 @@ onBeforeUnmount(() => {
         <div v-else>
           <div v-if="activeTab === 'archive' && canAccessArchive" class="page-fade">
             <AdminArchive
+              ref="archiveViewRef"
               :lockedMode="isChef ? 'records' : ''"
               :hideToggle="isChef"
               :canViewAudit="!isChef && canViewAudit"
@@ -357,7 +377,6 @@ onBeforeUnmount(() => {
             :completed="reportCompleted"
             @add-product="onAddProduct"
             @remove-entry="removeReportEntry"
-            @assistant-actions="applyAssistantActions"
             @locked-attempt="openReportLockedNotice"
           />
         </div>

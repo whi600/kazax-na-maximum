@@ -1,14 +1,24 @@
-import { requireUser } from '../auth.js'
+import { getUserPermissions, requireUser } from '../auth.js'
 import { requestAudioTranscription } from '../assistant/openai-compatible-client.js'
 import { runInventoryAssistant } from '../assistant/inventory-assistant.js'
-import { getToday } from '../date-utils.js'
+import { runCalendarAssistant } from '../assistant/calendar-assistant.js'
+import { executeCalendarAssistantActions } from '../assistant/calendar-executor.js'
+import { runGlobalAssistant } from '../assistant/global-assistant.js'
+import { runScheduleAssistant } from '../assistant/schedule-assistant.js'
+import { executeScheduleAssistantActions } from '../assistant/schedule-executor.js'
+import { getCurrentWeekStartDate, getToday } from '../date-utils.js'
 import { HttpError } from '../errors.js'
 import { badRequest, forbidden, json, readBufferBody, readJsonBody } from '../http.js'
 import {
   getDailyReportStatusStatement,
+  listCalendarEventsRangeStatement,
+  listScheduleAssignableUsersStatement,
+  listUpcomingShiftsStatement,
   listProductsStatement,
   listTodayRecordsStatement,
 } from '../statements.js'
+import { addDaysToDateKey } from './shift-route-utils.js'
+import { parseMutationMeta } from '../services/mutation-service.js'
 import {
   canEditDailyReport,
   canOverrideCompletedReport,
@@ -16,7 +26,7 @@ import {
 } from '../services/report-service.js'
 
 const COMMAND_LIMIT = 1_200
-const TRANSCRIPTION_AUDIO_LIMIT = 20 * 1024 * 1024
+const TRANSCRIPTION_AUDIO_LIMIT = 100 * 1024 * 1024
 const TRANSCRIPTION_MIME_TYPES = new Set([
   'audio/aac',
   'audio/flac',
@@ -49,6 +59,14 @@ const getContentLength = (req) => {
   return value
 }
 
+const appendSkippedActions = (reply, skippedActions = []) => {
+  if (!skippedActions.length) return reply
+  const details = skippedActions
+    .map((item) => `Действие ${item.index}: ${item.reason}`)
+    .join(' ')
+  return `${reply}\nНе выполнено: ${details}`.slice(0, 4_000)
+}
+
 const validateTranscriptionRequest = (req) => {
   const mimeType = getAudioMimeType(req)
   if (!TRANSCRIPTION_MIME_TYPES.has(mimeType)) {
@@ -61,7 +79,7 @@ const validateTranscriptionRequest = (req) => {
 
   const contentLength = getContentLength(req)
   if (contentLength !== null && contentLength > TRANSCRIPTION_AUDIO_LIMIT) {
-    throw new HttpError(413, 'Аудиозапись не должна быть больше 20 МБ.', 'AUDIO_TOO_LARGE')
+    throw new HttpError(413, 'Аудиозапись не должна быть больше 100 МБ.', 'AUDIO_TOO_LARGE')
   }
 
   return mimeType
@@ -76,19 +94,16 @@ const readTranscriptionAudio = async (req) => {
   }
 }
 
-export const handleAssistantRoutes = async ({ req, res, pathname }) => {
+export const handleAssistantRoutes = async ({ req, res, pathname, db }) => {
   const isInventoryRequest = pathname === '/api/assistant/inventory' && req.method === 'POST'
+  const isCalendarRequest = pathname === '/api/assistant/calendar' && req.method === 'POST'
+  const isGlobalRequest = pathname === '/api/assistant/global' && req.method === 'POST'
+  const isScheduleRequest = pathname === '/api/assistant/schedule' && req.method === 'POST'
   const isTranscriptionRequest = pathname === '/api/assistant/transcribe' && req.method === 'POST'
-  if (!isInventoryRequest && !isTranscriptionRequest) return false
+  if (!isInventoryRequest && !isCalendarRequest && !isGlobalRequest && !isScheduleRequest && !isTranscriptionRequest) return false
 
   const user = await requireUser(req, res)
   if (!user) return true
-
-  const date = getToday()
-  if (!(await canEditDailyReport(user, date))) {
-    forbidden(res, 'Изменять остатки может только сотрудник со сменой или администратор.')
-    return true
-  }
 
   if (isTranscriptionRequest) {
     const mimeType = validateTranscriptionRequest(req)
@@ -113,6 +128,91 @@ export const handleAssistantRoutes = async ({ req, res, pathname }) => {
     return true
   }
 
+  if (isGlobalRequest) {
+    const result = await runGlobalAssistant({ command })
+    json(res, 200, result)
+    return true
+  }
+
+  if (isCalendarRequest) {
+    const permissions = await getUserPermissions(user)
+    const today = getToday()
+    const [events] = await Promise.all([
+      listCalendarEventsRangeStatement.all(
+        addDaysToDateKey(today, -90),
+        addDaysToDateKey(today, 365),
+      ),
+    ])
+    const assistantResult = await runCalendarAssistant({
+      command,
+      today,
+      user,
+      canManageCalendar: permissions.scheduleManage,
+      events,
+    })
+    const execution = await executeCalendarAssistantActions({
+      db,
+      user,
+      permissions,
+      actions: assistantResult.actions,
+      meta: parseMutationMeta(req, body),
+    })
+    const skippedActions = [
+      ...(assistantResult.skippedActions || []),
+      ...(execution.skippedActions || []),
+    ]
+    json(res, 200, {
+      reply: appendSkippedActions(assistantResult.reply, skippedActions),
+      actions: execution.actions,
+      skippedActions,
+      revision: execution.revision,
+    })
+    return true
+  }
+
+  if (isScheduleRequest) {
+    const permissions = await getUserPermissions(user)
+    const weekStart = getCurrentWeekStartDate()
+    const [shifts, users] = await Promise.all([
+      listUpcomingShiftsStatement.all(weekStart),
+      permissions.scheduleManage
+        ? listScheduleAssignableUsersStatement.all()
+        : Promise.resolve([]),
+    ])
+    const assistantResult = await runScheduleAssistant({
+      command,
+      today: getToday(),
+      user,
+      canManageSchedule: permissions.scheduleManage,
+      shifts,
+      users,
+    })
+    const execution = await executeScheduleAssistantActions({
+      db,
+      user,
+      permissions,
+      actions: assistantResult.actions,
+      meta: parseMutationMeta(req, body),
+    })
+    const skippedActions = [
+      ...(assistantResult.skippedActions || []),
+      ...(execution.skippedActions || []),
+    ]
+    json(res, 200, {
+      reply: appendSkippedActions(assistantResult.reply, skippedActions),
+      actions: execution.actions,
+      skippedActions,
+      revision: execution.revision,
+    })
+    return true
+  }
+
+  const date = getToday()
+  if (!(await canEditDailyReport(user, date))) {
+    forbidden(res, 'Изменять остатки может только сотрудник со сменой или администратор.')
+    return true
+  }
+
   const reportStatus = await getDailyReportStatusStatement.get(date)
   if (reportStatus?.completed_at && !canOverrideCompletedReport(user)) {
     forbidden(res, 'Отчёт уже закрыт. Для изменений обратитесь к администратору.')
@@ -130,6 +230,9 @@ export const handleAssistantRoutes = async ({ req, res, pathname }) => {
     entries: mapReportEntries(rows),
   })
 
-  json(res, 200, result)
+  json(res, 200, {
+    ...result,
+    reply: appendSkippedActions(result.reply, result.skippedActions),
+  })
   return true
 }

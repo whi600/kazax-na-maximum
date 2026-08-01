@@ -69,6 +69,16 @@ const goBack = () => {
   else view.value = 'home'
 }
 
+const refreshCalendar = async () => {
+  if (view.value === 'day' && calendar.selectedDate.value) {
+    await calendar.loadDay(calendar.selectedDate.value)
+    return
+  }
+  if (view.value === 'calendar') await calendar.loadMonth()
+}
+
+defineExpose({ refreshCalendar })
+
 onMounted(() => reports.loadRecords())
 </script>
 

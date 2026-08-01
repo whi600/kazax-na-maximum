@@ -59,6 +59,7 @@ const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
             <span class="absolute bottom-1.5 flex h-1.5 items-center gap-0.5">
               <i v-if="cell.hasReport" class="h-1.5 w-1.5 rounded-full bg-blue-400" />
               <i v-if="cell.shiftsCount" class="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <i v-if="cell.eventsCount" class="h-1.5 w-1.5 rounded-full bg-violet-400" />
               <i v-if="cell.changesCount" class="h-1.5 w-1.5 rounded-full bg-orange-400" />
             </span>
           </button>
@@ -75,6 +76,7 @@ const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
     <div class="flex flex-wrap gap-x-4 gap-y-2 px-1 text-[9px] font-black uppercase text-slate-400">
       <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-blue-400" />Отчет</span>
       <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-emerald-400" />Смены</span>
+      <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-violet-400" />События</span>
       <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-orange-400" />Изменения</span>
     </div>
   </div>

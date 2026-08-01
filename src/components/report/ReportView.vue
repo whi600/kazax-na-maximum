@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 import { ChefHat, ChevronDown, LayoutGrid, LockKeyhole, ShoppingBasket } from 'lucide-vue-next'
 import EntryCard from './EntryCard.vue'
-import InventoryAssistant from './InventoryAssistant.vue'
 import ProductSelector from './ProductSelector.vue'
 
 const props = defineProps({
@@ -12,7 +11,7 @@ const props = defineProps({
   completed: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['add-product', 'remove-entry', 'locked-attempt', 'assistant-actions'])
+const emit = defineEmits(['add-product', 'remove-entry', 'locked-attempt'])
 
 const categories = [
   { key: 'bakery', label: 'Выпечка', icon: ShoppingBasket },
@@ -68,11 +67,6 @@ const notifyLockedAttempt = () => {
           <span class="mt-0.5 block text-[10px] font-bold leading-relaxed text-amber-700">Нужны правки? Обратитесь к администратору.</span>
         </span>
       </button>
-
-      <InventoryAssistant
-        :disabled="!editable"
-        @actions="emit('assistant-actions', $event)"
-      />
 
       <ProductSelector
         :products="products"

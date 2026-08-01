@@ -13,6 +13,7 @@ import {
   INVENTORY_ASSISTANT_SYSTEM_PROMPT,
   buildInventoryAssistantContext,
 } from './system-prompt.js'
+import { parseInventoryCommand } from './inventory-command-parser.js'
 
 const inventoryTool = {
   type: 'function',
@@ -146,16 +147,21 @@ export const runInventoryAssistant = async ({
   entries,
   env = process.env,
 }) => {
+  const directResult = parseInventoryCommand({ command, products })
   const toolMode = getAssistantToolMode(env)
   const context = { command, date, entries, env, products }
+  const runWithDirectFallback = async (runner) => {
+    const result = await runner()
+    return directResult && !result.actions?.length ? directResult : result
+  }
 
-  if (toolMode === 'json') return runJsonInventoryAssistant(context)
-  if (toolMode === 'native') return runNativeInventoryAssistant(context)
+  if (toolMode === 'json') return runWithDirectFallback(() => runJsonInventoryAssistant(context))
+  if (toolMode === 'native') return runWithDirectFallback(() => runNativeInventoryAssistant(context))
 
   try {
-    return await runNativeInventoryAssistant(context)
+    return await runWithDirectFallback(() => runNativeInventoryAssistant(context))
   } catch (error) {
     if (error?.code !== 'AI_TOOLS_UNSUPPORTED') throw error
-    return runJsonInventoryAssistant(context)
+    return runWithDirectFallback(() => runJsonInventoryAssistant(context))
   }
 }

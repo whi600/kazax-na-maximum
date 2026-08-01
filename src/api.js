@@ -216,6 +216,21 @@ export const assistantApi = {
       method: 'POST',
       body: JSON.stringify({ command }),
     }),
+  schedule: (command, meta = {}) =>
+    apiRequest('/api/assistant/schedule', {
+      method: 'POST',
+      body: JSON.stringify(withMutationMeta({ command }, meta)),
+    }),
+  calendar: (command, meta = {}) =>
+    apiRequest('/api/assistant/calendar', {
+      method: 'POST',
+      body: JSON.stringify(withMutationMeta({ command }, meta)),
+    }),
+  global: (command) =>
+    apiRequest('/api/assistant/global', {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    }),
   transcribe: (audio) =>
     apiRequest('/api/assistant/transcribe', {
       method: 'POST',

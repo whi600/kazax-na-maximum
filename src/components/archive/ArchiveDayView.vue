@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { CheckCircle2, Clock3, History, UsersRound } from 'lucide-vue-next'
+import { CalendarDays, CheckCircle2, Clock3, History, UsersRound } from 'lucide-vue-next'
 import {
   formatAuditAction,
   formatAuditEntity,
@@ -70,6 +70,39 @@ const weekday = computed(() => {
         </div>
         <p v-else class="px-3 py-5 text-center text-[10px] font-black uppercase text-slate-400">
           Смен не было
+        </p>
+      </section>
+
+      <section class="overflow-hidden rounded-lg border border-violet-100 bg-white shadow-sm">
+        <div class="flex items-center justify-between border-b border-violet-100 px-3 py-3">
+          <span class="flex items-center gap-2 text-xs font-black text-slate-800">
+            <CalendarDays class="h-4 w-4 text-violet-600" />
+            События
+          </span>
+          <span class="text-[10px] font-black uppercase text-slate-400">
+            {{ data.events?.length || 0 }}
+          </span>
+        </div>
+        <div v-if="data.events?.length" class="divide-y divide-violet-50">
+          <article v-for="event in data.events" :key="event.id" class="px-3 py-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-black text-slate-900">{{ event.title }}</p>
+                <p v-if="event.description" class="mt-1 text-xs font-semibold text-slate-500">
+                  {{ event.description }}
+                </p>
+              </div>
+              <span
+                v-if="event.start_time"
+                class="shrink-0 rounded-lg bg-violet-50 px-2.5 py-1.5 text-[11px] font-black text-violet-700"
+              >
+                {{ event.start_time }}-{{ event.end_time }}
+              </span>
+            </div>
+          </article>
+        </div>
+        <p v-else class="px-3 py-5 text-center text-[10px] font-black uppercase text-slate-400">
+          Событий нет
         </p>
       </section>
 

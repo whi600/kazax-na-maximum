@@ -1,11 +1,13 @@
 import { legacyMigrations } from './migrations/001-015.js'
 import { resourceRevisionsMigration } from './migrations/016_resource_revisions.js'
 import { shiftEmployeeIdentityMigration } from './migrations/017_shift_employee_identity.js'
+import { calendarEventsMigration } from './migrations/018_calendar_events.js'
 
 const migrations = [
   ...legacyMigrations,
   resourceRevisionsMigration,
   shiftEmployeeIdentityMigration,
+  calendarEventsMigration,
 ]
 
 export const runMigrations = async (database, migrationList = migrations) => {

@@ -1,4 +1,5 @@
 import { HttpError } from '../errors.js'
+import { parseAssistantJsonContent } from './json-response.js'
 
 export const INVENTORY_TOOL_NAME = 'set_inventory_remainders'
 
@@ -17,6 +18,52 @@ const hasExactKeys = (value, keys) =>
   isPlainObject(value) &&
   Object.keys(value).length === keys.length &&
   keys.every((key) => Object.hasOwn(value, key))
+
+const firstValue = (value, keys) => keys.map((key) => value?.[key]).find((item) => item !== undefined)
+const asNumber = (value) => {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && value.trim()) {
+    const number = Number(value.replace(',', '.'))
+    if (Number.isFinite(number)) return number
+  }
+  return value
+}
+const normalizeName = (value) => String(value || '').toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+const resolveProductId = (value, products) => {
+  const numeric = Number(value)
+  if (Number.isSafeInteger(numeric) && String(value).trim() !== '') return numeric
+  const target = normalizeName(value)
+  if (!target) return value
+  const matches = products.filter((product) => {
+    const name = normalizeName(product.name)
+    return name === target || (name.includes(target) && target.length >= 4)
+  })
+  return matches.length === 1 ? Number(matches[0].id) : value
+}
+
+const normalizeInventoryPayload = ({ payload, products }) => {
+  const rootActions = Array.isArray(payload?.actions)
+    ? payload.actions
+    : Array.isArray(payload?.updates)
+      ? payload.updates
+      : Array.isArray(payload?.changes)
+        ? payload.changes
+        : Object.hasOwn(payload || {}, 'remainder') ? [payload] : null
+  if (!rootActions) return payload
+  const actions = rootActions.map((rawAction) => ({
+    type: 'set_remainder',
+    product_id: resolveProductId(
+      firstValue(rawAction, ['product_id', 'productId', 'product', 'product_name', 'name', 'id']),
+      products,
+    ),
+    remainder: asNumber(firstValue(rawAction, ['remainder', 'quantity', 'amount', 'count', 'value', 'stock'])),
+  }))
+  return {
+    reply: firstValue(payload, ['reply', 'response', 'message']) || 'Готово.',
+    actions,
+  }
+}
 
 const parseToolArguments = (toolCall) => {
   try {
@@ -115,13 +162,12 @@ export const parseInventoryJsonResponse = ({ message, products }) => {
     invalidAction('ИИ не вернул JSON-ответ.')
   }
 
-  let payload
-  try {
-    payload = JSON.parse(content)
-  } catch {
+  const parsedPayload = parseAssistantJsonContent(content)
+  if (!parsedPayload) {
     invalidAction('ИИ вернул ответ не в формате JSON.')
   }
 
+  const payload = normalizeInventoryPayload({ payload: parsedPayload, products })
   if (!hasExactKeys(payload, ['reply', 'actions'])) {
     invalidAction('ИИ вернул неполный JSON-ответ.')
   }
@@ -129,13 +175,32 @@ export const parseInventoryJsonResponse = ({ message, products }) => {
     invalidAction('ИИ вернул недопустимый текст ответа.')
   }
 
-  return {
-    reply: payload.reply.trim(),
-    actions: validateActions({
-      rawActions: payload.actions,
-      products,
-      seenProductIds: new Set(),
-      requireAction: false,
-    }),
+  if (!Array.isArray(payload.actions) || payload.actions.length > MAX_ACTIONS) {
+    invalidAction('ИИ вернул недопустимый список изменений остатков.')
   }
+  const seenProductIds = new Set()
+  const actions = []
+  const skippedActions = []
+  for (const [index, rawAction] of payload.actions.entries()) {
+    const seenSnapshot = new Set(seenProductIds)
+    try {
+      actions.push(...validateActions({
+        rawActions: [rawAction],
+        products,
+        seenProductIds,
+        requireAction: true,
+      }))
+    } catch (error) {
+      if (payload.actions.length <= 1) throw error
+      seenProductIds.clear()
+      for (const productId of seenSnapshot) seenProductIds.add(productId)
+      skippedActions.push({
+        index: index + 1,
+        code: error?.code || 'AI_INVALID_ACTION',
+        reason: String(error?.message || 'Действие не выполнено.').slice(0, 300),
+      })
+    }
+  }
+  const result = { reply: payload.reply.trim(), actions }
+  return skippedActions.length ? { ...result, skippedActions } : result
 }

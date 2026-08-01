@@ -4,7 +4,7 @@ import {
 } from './statements.js'
 import { db } from './db.js'
 
-const editableResources = new Set(['schedule', 'assortment'])
+const editableResources = new Set(['schedule', 'assortment', 'calendar'])
 
 export const isEditableResource = (resource) => editableResources.has(resource)
 

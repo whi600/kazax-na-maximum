@@ -2,8 +2,11 @@ import { isSuperAdminUser, requirePermission } from '../auth.js'
 import { parseAuditJson } from '../audit.js'
 import { badRequest, json } from '../http.js'
 import { parseInteger, toShiftDto } from '../api-utils.js'
+import { toCalendarEventDto } from './calendar-event-routes.js'
 import {
   getDailyReportStatusStatement,
+  listCalendarEventsDayStatement,
+  listCalendarEventsRangeStatement,
   listArchiveCalendarDaysStatement,
   listArchiveDayAuditStatement,
   listArchiveDayRecordsStatement,
@@ -92,16 +95,26 @@ const handleCalendar = async ({ res, requestUrl, archiveSuperAdmin }) => {
     badRequest(res, 'Некорректный месяц')
     return true
   }
-  const rows = await listArchiveCalendarDaysStatement.all(
-    range.start,
-    range.end,
-    range.start,
-    range.end,
-    range.start,
-    range.end,
-    range.start,
-    range.end,
-  )
+  const [rows, eventRows] = await Promise.all([
+    listArchiveCalendarDaysStatement.all(
+      range.start,
+      range.end,
+      range.start,
+      range.end,
+      range.start,
+      range.end,
+      range.start,
+      range.end,
+      range.start,
+      range.end,
+    ),
+    listCalendarEventsRangeStatement.all(range.start, range.end),
+  ])
+  const eventsByDate = new Map()
+  for (const event of eventRows) {
+    const date = event.event_date
+    eventsByDate.set(date, (eventsByDate.get(date) || 0) + 1)
+  }
   json(res, 200, {
     month: range.start.slice(0, 7),
     days: rows.map((row) => ({
@@ -110,6 +123,7 @@ const handleCalendar = async ({ res, requestUrl, archiveSuperAdmin }) => {
       shiftsCount: Number(row.shifts_count || 0),
       assignedCount: Number(row.assigned_count || 0),
       changesCount: archiveSuperAdmin ? Number(row.changes_count || 0) : 0,
+      eventsCount: eventsByDate.get(row.date) || 0,
     })),
   })
   return true
@@ -121,16 +135,18 @@ const handleDay = async ({ res, requestUrl, archiveSuperAdmin }) => {
     badRequest(res, 'Некорректная дата')
     return true
   }
-  const [recordRows, shiftRows, auditRows, reportStatus] = await Promise.all([
+  const [recordRows, shiftRows, auditRows, reportStatus, eventRows] = await Promise.all([
     listArchiveDayRecordsStatement.all(date),
     listArchiveDayShiftsStatement.all(date),
     archiveSuperAdmin ? listArchiveDayAuditStatement.all(date, date) : [],
     getDailyReportStatusStatement.get(date),
+    listCalendarEventsDayStatement.all(date),
   ])
   json(res, 200, {
     date,
     records: recordRows.map(mapRecord),
     shifts: shiftRows.map(toShiftDto),
+    events: eventRows.map(toCalendarEventDto),
     changes: auditRows.map(mapAudit),
     reportStatus: {
       completed: Boolean(reportStatus?.completed_at),

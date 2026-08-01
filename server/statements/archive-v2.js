@@ -44,6 +44,13 @@ export const listArchiveCalendarDaysStatement = db.prepare(`
     WHERE created_at >= ?::date
       AND created_at < (?::date + INTERVAL '1 day')
     GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
+
+    UNION ALL
+
+    SELECT event_date AS date, 0 AS reports, 0 AS shifts, 0 AS assigned, 0 AS changes
+    FROM calendar_events
+    WHERE event_date >= ? AND event_date <= ? AND deleted_at IS NULL
+    GROUP BY event_date
   )
   SELECT
     date,

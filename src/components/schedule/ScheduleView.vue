@@ -257,6 +257,7 @@ defineExpose({
   openPendingRequests: () => {
     showPendingSheet.value = true
   },
+  refresh: () => fetchShifts({ preserveDrafts: false, skipDefaultBootstrap: true }),
 })
 
 watch(() => props.displayName, resolveUserName)
