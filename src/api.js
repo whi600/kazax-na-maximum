@@ -216,6 +216,14 @@ export const assistantApi = {
       method: 'POST',
       body: JSON.stringify({ command }),
     }),
+  transcribe: (audio) =>
+    apiRequest('/api/assistant/transcribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': audio?.type || 'audio/webm',
+      },
+      body: audio,
+    }),
 }
 
 export const editingApi = {

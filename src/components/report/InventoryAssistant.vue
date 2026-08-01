@@ -15,11 +15,26 @@ const reply = ref('')
 const errorMessage = ref('')
 const busy = ref(false)
 const listening = ref(false)
+const recording = ref(false)
+const transcribing = ref(false)
 let recognition = null
+let recorder = null
+let recorderStream = null
 
 const voiceSupported = computed(() =>
   typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition),
 )
+
+const recordingSupported = computed(() =>
+  typeof navigator !== 'undefined' &&
+  Boolean(navigator.mediaDevices?.getUserMedia) &&
+  typeof MediaRecorder !== 'undefined',
+)
+
+const voiceButtonLabel = computed(() => {
+  if (transcribing.value) return 'Распознаю…'
+  return recording.value || listening.value ? 'Остановить' : 'Начать запись'
+})
 
 const openAssistant = () => {
   if (props.disabled) return
@@ -32,12 +47,111 @@ const stopListening = () => {
   listening.value = false
 }
 
+const requestMicrophoneAccess = async () => {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  stream.getTracks().forEach((track) => track.stop())
+}
+
+const releaseRecorderStream = () => {
+  recorderStream?.getTracks().forEach((track) => track.stop())
+  recorderStream = null
+}
+
+const stopRecording = () => {
+  if (recorder?.state === 'recording') recorder.stop()
+}
+
+const cancelRecording = () => {
+  if (recorder?.state === 'recording') {
+    recorder.ondataavailable = null
+    recorder.onstop = null
+    recorder.stop()
+  }
+  recorder = null
+  recording.value = false
+  listening.value = false
+  releaseRecorderStream()
+}
+
+const startRecording = async () => {
+  errorMessage.value = ''
+  reply.value = ''
+
+  try {
+    recorderStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const chunks = []
+    const activeRecorder = new MediaRecorder(recorderStream)
+    recorder = activeRecorder
+
+    activeRecorder.ondataavailable = (event) => {
+      if (event.data?.size) chunks.push(event.data)
+    }
+    activeRecorder.onerror = () => {
+      errorMessage.value = 'Не удалось записать голос. Попробуйте ещё раз.'
+    }
+    activeRecorder.onstop = async () => {
+      if (recorder === activeRecorder) recorder = null
+      recording.value = false
+      listening.value = false
+      releaseRecorderStream()
+
+      const audio = new Blob(chunks, {
+        type: activeRecorder.mimeType || chunks[0]?.type || 'audio/webm',
+      })
+      if (!audio.size) {
+        errorMessage.value = 'Запись получилась пустой. Скажите команду ещё раз.'
+        return
+      }
+
+      transcribing.value = true
+      try {
+        const response = await assistantApi.transcribe(audio)
+        command.value = String(response?.text || '').trim()
+        if (!command.value) {
+          errorMessage.value = 'Не удалось распознать голос. Скажите команду ещё раз.'
+        }
+      } catch (error) {
+        errorMessage.value = error?.message || 'Не удалось распознать голос. Попробуйте ещё раз.'
+      } finally {
+        transcribing.value = false
+      }
+    }
+
+    activeRecorder.start(1000)
+    recording.value = true
+  } catch (error) {
+    recorder = null
+    recording.value = false
+    listening.value = false
+    releaseRecorderStream()
+    errorMessage.value = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
+      ? 'Разрешите доступ к микрофону, чтобы пользоваться голосовым вводом.'
+      : 'Не удалось включить микрофон. Проверьте его и попробуйте ещё раз.'
+  }
+}
+
+const startVoiceInput = () => {
+  if (busy.value || transcribing.value) return
+  if (recording.value) {
+    stopRecording()
+    return
+  }
+  if (recordingSupported.value) {
+    void startRecording()
+    return
+  }
+  void startListening()
+}
+
 const closeAssistant = () => {
   stopListening()
+  cancelRecording()
   isOpen.value = false
 }
 
-const startListening = () => {
+const startListening = async () => {
   errorMessage.value = ''
   if (!voiceSupported.value) {
     errorMessage.value = 'Голосовой ввод не поддерживается в этом браузере. Напишите команду текстом.'
@@ -69,6 +183,7 @@ const startListening = () => {
   }
 
   try {
+    await requestMicrophoneAccess()
     recognition.start()
     listening.value = true
   } catch {
@@ -102,7 +217,10 @@ const sendCommand = async () => {
   }
 }
 
-onBeforeUnmount(stopListening)
+onBeforeUnmount(() => {
+  stopListening()
+  cancelRecording()
+})
 </script>
 
 <template>
@@ -167,7 +285,7 @@ onBeforeUnmount(stopListening)
               v-model="command"
               rows="3"
               maxlength="1200"
-              :disabled="busy"
+              :disabled="busy || recording || transcribing"
               class="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-800 outline-none transition focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-100 disabled:opacity-60"
               placeholder="Например: поставь остаток молока 7"
             />
@@ -175,16 +293,17 @@ onBeforeUnmount(stopListening)
             <div class="flex gap-2">
               <button
                 type="button"
-                :disabled="busy"
+                :disabled="busy || transcribing"
+                :aria-label="recording || listening ? 'Остановить голосовую запись' : 'Начать голосовую запись'"
                 class="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-violet-100 bg-violet-50 px-3 text-[11px] font-black text-violet-700 transition-all active:scale-95 disabled:opacity-50"
-                @click="startListening"
+                @click="startVoiceInput"
               >
-                <Mic class="h-4 w-4" :class="{ 'animate-pulse': listening }" />
-                {{ listening ? 'Слушаю…' : 'Сказать' }}
+                <Mic class="h-4 w-4" :class="{ 'animate-pulse': listening || recording || transcribing }" />
+                {{ voiceButtonLabel }}
               </button>
               <button
                 type="submit"
-                :disabled="busy || !command.trim()"
+                :disabled="busy || recording || transcribing || !command.trim()"
                 class="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 text-[11px] font-black text-white shadow-lg shadow-violet-100 transition-all active:scale-95 disabled:opacity-50"
               >
                 <LoaderCircle v-if="busy" class="h-4 w-4 animate-spin" />
@@ -192,6 +311,12 @@ onBeforeUnmount(stopListening)
                 {{ busy ? 'Выполняю…' : 'Отправить' }}
               </button>
             </div>
+            <p v-if="recording" class="text-center text-[10px] font-bold text-violet-600">
+              Идёт запись. Она продолжится, пока вы не нажмёте «Остановить».
+            </p>
+            <p v-else-if="transcribing" class="text-center text-[10px] font-bold text-violet-600">
+              Распознаю запись…
+            </p>
           </form>
 
           <p v-if="reply" class="mt-3 rounded-xl bg-emerald-50 px-3 py-2.5 text-[11px] font-bold leading-relaxed text-emerald-800" aria-live="polite">

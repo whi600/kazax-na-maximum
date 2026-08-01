@@ -1,3 +1,5 @@
+import { bodyTooLargeError, invalidJsonError, isHttpError } from './errors.js'
+
 export const json = (res, statusCode, payload) => {
   const body = JSON.stringify(payload)
   res.writeHead(statusCode, {
@@ -97,7 +99,7 @@ export const readBufferBody = (req, maxSize) =>
     req.on('data', (chunk) => {
       total += chunk.length
       if (total > maxSize) {
-        reject(new Error('Request body too large'))
+        reject(bodyTooLargeError())
         req.destroy()
         return
       }
@@ -128,4 +130,3 @@ export const withErrorHandling = async (res, fn) => {
     json(res, 500, { error: 'Внутренняя ошибка сервера' })
   }
 }
-import { bodyTooLargeError, invalidJsonError, isHttpError } from './errors.js'

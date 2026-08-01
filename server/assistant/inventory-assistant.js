@@ -8,6 +8,7 @@ import {
   requestAssistantCompletion,
 } from './openai-compatible-client.js'
 import {
+  INVENTORY_ASSISTANT_JSON_RESPONSE_FORMAT,
   INVENTORY_ASSISTANT_JSON_SYSTEM_PROMPT,
   INVENTORY_ASSISTANT_SYSTEM_PROMPT,
   buildInventoryAssistantContext,
@@ -78,7 +79,19 @@ const runJsonInventoryAssistant = async ({ command, date, entries, env, products
     products,
     toolMode: 'json',
   })
-  const message = await requestAssistantCompletion({ messages, env })
+  let message
+  try {
+    message = await requestAssistantCompletion({
+      messages,
+      env,
+      responseFormat: INVENTORY_ASSISTANT_JSON_RESPONSE_FORMAT,
+      temperature: 0,
+    })
+  } catch (error) {
+    if (error?.code !== 'AI_RESPONSE_FORMAT_UNSUPPORTED') throw error
+
+    message = await requestAssistantCompletion({ messages, env, temperature: 0 })
+  }
   return parseInventoryJsonResponse({ message, products })
 }
 
